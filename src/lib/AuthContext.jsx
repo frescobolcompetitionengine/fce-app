@@ -14,12 +14,11 @@ import {
 } from '@/services/usersRepository';
 import { loadLatestSettingsForUser } from '@/services/settingsRepository';
 import { apiRequest } from '@/services/apiClient';
+import { clearTrackedNavigationPaths } from '@/lib/NavigationTracker';
 
 const AuthContext = createContext(null);
 
-const AUTH_SESSION_COLLECTION = 'auth_sessions';
-const AUTH_BROWSER_SESSION_KEY = 'frescobol_auth_session_id_v1';
-const AUTH_BROWSER_SESSION_STATE_KEY = 'frescobol_auth_session_state_v1';
+const AUTH_SESSION_ENDPOINT = '/api/auth/session';
 const MAIN_ADMIN_EMAIL = 'admin@frescobol.local';
 const MAIN_ADMIN_PASSWORD = 'Luana123*';
 let bootstrapUsersPromise = null;
@@ -30,86 +29,45 @@ const newId = () => (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.
  * @typedef {Error & { code: string }} TaggedAuthError
  */
 
-function getBrowserSessionId() {
-  if (typeof window === 'undefined') {
-    return newId();
-  }
-
-  let sessionId = window.sessionStorage.getItem(AUTH_BROWSER_SESSION_KEY);
-  if (!sessionId) {
-    sessionId = newId();
-    window.sessionStorage.setItem(AUTH_BROWSER_SESSION_KEY, sessionId);
-  }
-  return sessionId;
+/**
+ * @param {string} message
+ * @param {string} code
+ * @returns {TaggedAuthError}
+ */
+function createTaggedError(message, code) {
+  const error = /** @type {TaggedAuthError} */ (new Error(message));
+  error.code = code;
+  return error;
 }
 
 async function persistSessionRecord(payload) {
-  const sessionId = getBrowserSessionId();
-  const sessionRecord = {
-    id: sessionId,
-    ...payload,
-  };
-
-  return apiRequest('/api/records', {
+  return apiRequest(AUTH_SESSION_ENDPOINT, {
     method: 'POST',
-    params: { collection: AUTH_SESSION_COLLECTION },
-    body: sessionRecord,
+    body: payload,
     timeoutMs: 2500,
-  }).then((saved) => {
-    if (typeof window !== 'undefined') {
-      window.sessionStorage.setItem(AUTH_BROWSER_SESSION_STATE_KEY, JSON.stringify(saved || sessionRecord));
-    }
-    return saved;
-  }).catch((error) => {
-    if (typeof window !== 'undefined') {
-      window.sessionStorage.setItem(AUTH_BROWSER_SESSION_STATE_KEY, JSON.stringify(sessionRecord));
-    }
-    return sessionRecord;
   });
 }
 
 async function loadSessionRecord() {
-  if (typeof window === 'undefined') return null;
-  const sessionId = window.sessionStorage.getItem(AUTH_BROWSER_SESSION_KEY);
-  if (!sessionId) return null;
-
   try {
-    const remote = await apiRequest(`/api/records/${encodeURIComponent(sessionId)}`, {
-      params: { collection: AUTH_SESSION_COLLECTION },
+    return await apiRequest(AUTH_SESSION_ENDPOINT, {
+      method: 'GET',
       timeoutMs: 2500,
     });
-    if (remote) {
-      window.sessionStorage.setItem(AUTH_BROWSER_SESSION_STATE_KEY, JSON.stringify(remote));
-      return remote;
-    }
-  } catch {
-    // Fall through to browser-session fallback below.
-  }
-
-  try {
-    const fallback = window.sessionStorage.getItem(AUTH_BROWSER_SESSION_STATE_KEY);
-    return fallback ? JSON.parse(fallback) : null;
   } catch {
     return null;
   }
 }
 
 async function clearSessionRecord() {
-  if (typeof window === 'undefined') return;
-  const sessionId = window.sessionStorage.getItem(AUTH_BROWSER_SESSION_KEY);
-  if (!sessionId) return;
-
   try {
-    await apiRequest(`/api/records/${encodeURIComponent(sessionId)}`, {
+    await apiRequest(AUTH_SESSION_ENDPOINT, {
       method: 'DELETE',
-      params: { collection: AUTH_SESSION_COLLECTION },
       timeoutMs: 2500,
     });
   } catch {
-    // Ignore session cleanup failures; browser state is still cleared below.
+    // Ignore session cleanup failures; the backend session is the source of truth.
   }
-  window.sessionStorage.removeItem(AUTH_BROWSER_SESSION_KEY);
-  window.sessionStorage.removeItem(AUTH_BROWSER_SESSION_STATE_KEY);
 }
 
 function isStrongPassword(password) {
@@ -129,17 +87,6 @@ function normalizeEmail(email) {
 function isValidEmail(email) {
   const value = normalizeEmail(email);
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
-/**
- * @param {string} message
- * @param {string} code
- * @returns {TaggedAuthError}
- */
-function createTaggedError(message, code) {
-  const error = /** @type {TaggedAuthError} */ (new Error(message));
-  error.code = code;
-  return error;
 }
 
 function migrateUsers(users) {
@@ -230,7 +177,7 @@ export const AuthProvider = ({ children }) => {
     return list;
   };
 
-  const refreshPublicSettings = async (userId) => {
+  const refreshPublicSettings = async (userId, ownerEmail = '') => {
     if (!userId || userId === 'spectator') {
       setAppPublicSettings(null);
       setIsLoadingPublicSettings(false);
@@ -239,7 +186,7 @@ export const AuthProvider = ({ children }) => {
 
     setIsLoadingPublicSettings(true);
     try {
-      const latestSettings = await loadLatestSettingsForUser(userId);
+      const latestSettings = await loadLatestSettingsForUser(userId, ownerEmail);
       setAppPublicSettings(latestSettings || null);
       return latestSettings || null;
     } finally {
@@ -300,7 +247,7 @@ export const AuthProvider = ({ children }) => {
     setUser(found);
     setIsAuthenticated(true);
     setAuthError(null);
-    await refreshPublicSettings(found.id);
+    await refreshPublicSettings(found.id, found.email);
   };
 
   useEffect(() => {
@@ -379,6 +326,7 @@ export const AuthProvider = ({ children }) => {
 
     if (isSubscriptionExpired(found)) {
       await clearSessionRecord();
+      clearTrackedNavigationPaths();
       setUser(null);
       setIsAuthenticated(false);
       setAuthError({ type: 'subscription_expired', user: found });
@@ -386,15 +334,17 @@ export const AuthProvider = ({ children }) => {
     }
 
     await persistSessionRecord({ user_id: found.id, user_email: found.email, spectator_mode: false });
+    clearTrackedNavigationPaths();
     setUser(found);
     setIsAuthenticated(true);
     setAuthError(null);
-    await refreshPublicSettings(found.id);
+    await refreshPublicSettings(found.id, found.email);
     return found;
   };
 
   const logout = async () => {
     await clearSessionRecord();
+    clearTrackedNavigationPaths();
     setUser(null);
     setIsAuthenticated(false);
     setAuthError(null);
@@ -404,6 +354,7 @@ export const AuthProvider = ({ children }) => {
 
   const enterSpectatorMode = async () => {
     await persistSessionRecord({ user_id: null, user_email: 'spectator@local', spectator_mode: true, role: 'spectator' });
+    clearTrackedNavigationPaths();
     setUser({ id: 'spectator', role: 'spectator', email: 'spectator@local' });
     setIsAuthenticated(true);
     setAuthError(null);
@@ -582,7 +533,7 @@ export const AuthProvider = ({ children }) => {
         setUser(refreshed);
         setIsAuthenticated(true);
         setAuthError(null);
-        await refreshPublicSettings(refreshed.id);
+        await refreshPublicSettings(refreshed.id, refreshed.email);
       }
     }
   };

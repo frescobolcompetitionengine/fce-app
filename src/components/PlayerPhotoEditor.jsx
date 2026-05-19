@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { useI18n } from '@/lib/i18n';
 import { uploadImageFile } from '@/services/fileService';
 
-export default function PlayerPhotoEditor({ photoUrl, onPhotoChange, label }) {
+export default function PlayerPhotoEditor({ photoUrl, onPhotoChange, label, disabled = false }) {
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
@@ -44,23 +44,29 @@ export default function PlayerPhotoEditor({ photoUrl, onPhotoChange, label }) {
       {/* Action buttons */}
       <div className="flex gap-2 flex-wrap justify-center">
         <button
+          type="button"
+          disabled={disabled}
           onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#2a2a4a] hover:bg-[#3a3a5a] text-xs text-gray-300 transition-colors"
+          className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#2a2a4a] hover:bg-[#3a3a5a] text-xs text-gray-300 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Upload className="w-3 h-3" />
           {t('upload')}
         </button>
         <button
+          type="button"
+          disabled={disabled}
           onClick={() => cameraInputRef.current?.click()}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#2a2a4a] hover:bg-[#3a3a5a] text-xs text-gray-300 transition-colors"
+          className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#2a2a4a] hover:bg-[#3a3a5a] text-xs text-gray-300 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Camera className="w-3 h-3" />
           {t('camera')}
         </button>
         {photoUrl && (
           <button
+            type="button"
+            disabled={disabled}
             onClick={() => onPhotoChange('')}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-red-900/40 hover:bg-red-800/60 text-xs text-red-400 transition-colors"
+            className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-red-900/40 hover:bg-red-800/60 text-xs text-red-400 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Trash2 className="w-3 h-3" />
             {t('remove')}

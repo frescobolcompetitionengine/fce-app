@@ -11,7 +11,7 @@ export default function TournamentRoom() {
   const { t } = useI18n();
 
   if (isSpectator) return <Navigate to={createPageUrl('SpectatorHub')} replace />;
-  if (!isTournament) return <Navigate to={isAdmin ? createPageUrl('AdminDashboard') : createPageUrl('GameSetup')} replace />;
+  if (!isTournament) return <Navigate to={isAdmin ? createPageUrl('AdminDashboard') : createPageUrl('SpeedMeter')} replace />;
 
   return (
     <div className="min-h-[100dvh] bg-gradient-to-b from-[#1a1a2e] to-[#0d0d1a] text-white">

@@ -10,33 +10,28 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { createPageUrl } from '@/utils';
 import { setAppLanguage, useI18n } from '@/lib/i18n';
-import { getScoringModeDefaults } from '@/lib/scoring';
+import { resolveScoringConfiguration } from '@/lib/scoring';
 import { useAuth } from '@/lib/AuthContext';
+import { isGameSessionActive } from '@/lib/gameSessionState';
 import PageShell from '@/components/PageShell';
-import { createSettings, listSettings, updateSettings } from '@/services/settingsRepository';
+import {
+  createSettings,
+  loadLatestSettingsForUser,
+  updateSettings,
+  SETTINGS_PROFILE_DEFAULTS,
+} from '@/services/settingsRepository';
 import { getLatestGameSession } from '@/services/gameSessionRepository';
 
 const defaultFormData = {
   duo_name: '',
   visibility: 'private',
-  distance_meters: 10,
-  match_duration_minutes: 5,
-  warmup_duration_minutes: 5,
+  ...SETTINGS_PROFILE_DEFAULTS,
   player_left_name: '',
   player_right_name: '',
   player_left_photo: '',
   player_right_photo: '',
   player_left_radar_enabled: false,
   player_right_radar_enabled: false,
-  language: 'pt-BR',
-  scoring_mode: 'option_1',
-  min_scoring_speed: 50,
-  free_ball_drops: 5,
-  max_ball_drops: 20,
-  count_ball_drops: true,
-  balance_enabled: true,
-  continuity_enabled: false,
-  power_enabled: false,
 };
 
 const GENERIC_TEAM_NAME_PATTERN = /^[A-Z]{3}\s[A-Z]\s&\s[A-Z]{3}\s[A-Z]$/;
@@ -58,28 +53,26 @@ export default function GameSetup() {
   const [checkingActiveSession, setCheckingActiveSession] = useState(true);
   const [activeSession, setActiveSession] = useState(null);
 
-  const getLatestSettings = async () => {
-    const all = await listSettings('-updated_at', 500);
-    const mine = all.filter((s) => s.owner_user_id === user?.id);
-    if (mine.length > 0) return mine[0];
-    return null;
-  };
-
   const { data: settings, isLoading } = useQuery({
     queryKey: ['settings'],
     enabled: !isSpectator,
     queryFn: async () => {
-      const latest = await getLatestSettings();
-      if (latest) return latest;
-      return createSettings({ ...defaultFormData, owner_user_id: user?.id, owner_email: user?.email });
+      return loadLatestSettingsForUser(user?.id, user?.email);
     },
   });
 
   useEffect(() => {
     if (!settings) return;
     setAppLanguage(settings.language || 'pt-BR');
-    const scoringMode = settings.scoring_mode || 'option_1';
-    const scoringModeDefaults = getScoringModeDefaults(scoringMode);
+    const scoringConfig = resolveScoringConfiguration(
+      settings.scoring_mode || 'option_1',
+      settings.min_scoring_speed ?? 50,
+      {
+        balanceEnabled: settings.balance_enabled,
+        continuityEnabled: settings.continuity_enabled,
+        powerEnabled: settings.power_enabled,
+      },
+    );
     setFormData({
       duo_name: normalizeDisplayedValue(settings.duo_name, GENERIC_TEAM_NAME_PATTERN),
       visibility: settings.visibility || 'private',
@@ -93,15 +86,14 @@ export default function GameSetup() {
       player_left_radar_enabled: settings.player_left_radar_enabled ?? false,
       player_right_radar_enabled: settings.player_right_radar_enabled ?? false,
       language: settings.language || 'pt-BR',
-      scoring_mode: scoringMode,
-      min_scoring_speed: settings.min_scoring_speed ?? 50,
+      scoring_mode: scoringConfig.scoringMode,
+      min_scoring_speed: scoringConfig.minScoringSpeed,
       free_ball_drops: settings.free_ball_drops ?? 5,
       max_ball_drops: settings.max_ball_drops ?? 20,
       count_ball_drops: settings.count_ball_drops ?? true,
-      ...scoringModeDefaults,
-      balance_enabled: settings.balance_enabled ?? scoringModeDefaults.balance_enabled,
-      continuity_enabled: settings.continuity_enabled ?? scoringModeDefaults.continuity_enabled,
-      power_enabled: settings.power_enabled ?? scoringModeDefaults.power_enabled,
+      balance_enabled: scoringConfig.balanceEnabled,
+      continuity_enabled: scoringConfig.continuityEnabled,
+      power_enabled: scoringConfig.powerEnabled,
     });
   }, [settings]);
 
@@ -117,7 +109,7 @@ export default function GameSetup() {
       const activeSession = await getLatestGameSession(user.id);
       if (cancelled) return;
 
-      if (activeSession && !activeSession.match_ended && (activeSession.is_warming_up || activeSession.game_started || activeSession.is_running || activeSession.game_status === 'warmup' || (activeSession.game_status === 'paused' && !activeSession.warmup_completed && (activeSession.warmup_started_at_ms || Number(activeSession.warmup_accumulated_ms || 0) > 0)))) {
+      if (isGameSessionActive(activeSession)) {
         setActiveSession(activeSession);
       } else {
         setActiveSession(null);
@@ -150,7 +142,23 @@ export default function GameSetup() {
 
   const handleChange = (field, value) => setFormData((prev) => (
     field === 'scoring_mode'
-      ? { ...prev, scoring_mode: value, ...getScoringModeDefaults(value) }
+      ? ({
+          ...prev,
+          scoring_mode: value,
+          ...(() => {
+            const config = resolveScoringConfiguration(value, prev.min_scoring_speed, {
+              balanceEnabled: prev.balance_enabled,
+              continuityEnabled: prev.continuity_enabled,
+              powerEnabled: prev.power_enabled,
+            });
+            return {
+              min_scoring_speed: config.minScoringSpeed,
+              balance_enabled: config.balanceEnabled,
+              continuity_enabled: config.continuityEnabled,
+              power_enabled: config.powerEnabled,
+            };
+          })(),
+        })
       : { ...prev, [field]: value }
   ));
   const handleNumericChange = (field, value) => setFormData((prev) => ({ ...prev, [field]: parseFloat(value) || 0 }));

@@ -1,5 +1,6 @@
 import { clone, generateId, readJson, sortItems, writeJson } from './storage';
 import { apiRequest, isServerStorageMode } from './apiClient';
+import { isGameSessionActive } from '@/lib/gameSessionState';
 
 const GAME_SESSIONS_KEY = 'frescobol_game_sessions_v1';
 const GAME_SESSION_COLLECTION = 'game_sessions';
@@ -82,28 +83,13 @@ export async function listGameSessions(order = '-updated_at', limit = 100, owner
 export async function getLatestGameSession(ownerUserId) {
   if (!ownerUserId) return null;
   const sessions = await listGameSessions('-updated_at', 50, ownerUserId);
-  return sessions.find((item) => isActiveSession(item)) || null;
-}
-
-function isActiveSession(session) {
-  return !session?.match_ended && (
-    session.game_status === 'warmup'
-    || session.game_status === 'live'
-    || (session.game_status === 'paused' && (
-      !session.warmup_completed
-      || session.is_warming_up
-      || session.game_started
-      || session.is_running
-      || session.warmup_started_at_ms
-      || Number(session.warmup_accumulated_ms || 0) > 0
-    ))
-  );
+  return sessions.find((item) => isGameSessionActive(item)) || null;
 }
 
 export async function clearActiveGameSessions(ownerUserId) {
   if (!ownerUserId) return [];
   const sessions = await listGameSessions('-updated_at', 100, ownerUserId);
-  const activeSessions = sessions.filter((session) => isActiveSession(session));
+  const activeSessions = sessions.filter((session) => isGameSessionActive(session));
   if (activeSessions.length === 0) return [];
 
   await Promise.allSettled(activeSessions.map((session) => deleteGameSession(session.id)));

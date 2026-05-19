@@ -1,5 +1,5 @@
 export const pagesConfig = {
-  mainPage: 'GameSetup',
+  mainPage: 'SpeedMeter',
   Pages: {
     Login: {
       path: '/Login',

@@ -1565,7 +1565,7 @@ export default function Analysis() {
   const [detailReport, setDetailReport] = useState(null);
 
   if (isSpectator) return <Navigate to={createPageUrl('SpectatorHub')} replace />;
-  if (!isAdmin) return <Navigate to={createPageUrl('GameSetup')} replace />;
+  if (!isAdmin) return <Navigate to={createPageUrl('SpeedMeter')} replace />;
 
   const normalizedReports = useMemo(() => reports.map(normalizeAnalysisRecord), [reports]);
 

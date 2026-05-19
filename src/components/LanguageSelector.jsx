@@ -8,7 +8,7 @@ const LANGUAGE_OPTIONS = [
   { value: 'ja', label: '日本語' },
 ];
 
-export default function LanguageSelector({ value, onChange }) {
+export default function LanguageSelector({ value, onChange, disabled = false }) {
   const { t } = useI18n();
 
   return (
@@ -27,7 +27,8 @@ export default function LanguageSelector({ value, onChange }) {
         <select
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full h-11 appearance-none rounded-xl bg-[#0d0d1a] border border-[#3a3a5a] px-3 pr-10 text-white"
+          disabled={disabled}
+          className="w-full h-11 appearance-none rounded-xl bg-[#0d0d1a] border border-[#3a3a5a] px-3 pr-10 text-white disabled:cursor-not-allowed disabled:opacity-60"
         >
           {LANGUAGE_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>

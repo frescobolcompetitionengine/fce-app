@@ -30,6 +30,7 @@ import {
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '127.0.0.1';
+const AUTH_SESSION_COOKIE = 'fce_auth_session_id';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const APP_DIST_DIR = path.join(__dirname, '..', 'dist');
@@ -139,6 +140,31 @@ function readTextBody(req) {
   });
 }
 
+function parseCookies(cookieHeader = '') {
+  return String(cookieHeader || '')
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .reduce((acc, part) => {
+      const separatorIndex = part.indexOf('=');
+      if (separatorIndex === -1) return acc;
+      const key = decodeURIComponent(part.slice(0, separatorIndex).trim());
+      const value = decodeURIComponent(part.slice(separatorIndex + 1).trim());
+      if (key) acc[key] = value;
+      return acc;
+    }, {});
+}
+
+function buildCookie(name, value, options = {}) {
+  const parts = [`${encodeURIComponent(name)}=${encodeURIComponent(value)}`];
+  parts.push('Path=/');
+  parts.push('SameSite=Lax');
+  if (options.httpOnly !== false) parts.push('HttpOnly');
+  if (options.maxAge != null) parts.push(`Max-Age=${Math.max(0, Number(options.maxAge) || 0)}`);
+  if (options.secure) parts.push('Secure');
+  return parts.join('; ');
+}
+
 function getCollection(reqUrl) {
   return reqUrl.searchParams.get('collection');
 }
@@ -181,6 +207,55 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && pathname === '/api/health') {
       sendJson(res, 200, healthCheck());
+      return;
+    }
+
+    if (pathname === '/api/auth/session' && req.method === 'GET') {
+      const cookies = parseCookies(req.headers.cookie || '');
+      const sessionId = cookies[AUTH_SESSION_COOKIE];
+      if (!sessionId) {
+        sendJson(res, 404, { error: 'session not found' });
+        return;
+      }
+      const session = getRecord('auth_sessions', sessionId);
+      if (!session) {
+        res.setHeader('Set-Cookie', buildCookie(AUTH_SESSION_COOKIE, '', { maxAge: 0 }));
+        sendJson(res, 404, { error: 'session not found' });
+        return;
+      }
+      sendJson(res, 200, session);
+      return;
+    }
+
+    if (pathname === '/api/auth/session' && req.method === 'POST') {
+      const body = await readBody(req).catch(() => null);
+      if (!body || typeof body !== 'object') {
+        sendJson(res, 400, { error: 'invalid body' });
+        return;
+      }
+
+      const cookies = parseCookies(req.headers.cookie || '');
+      const existingSessionId = cookies[AUTH_SESSION_COOKIE] || body.id || null;
+      const saved = upsertRecord('auth_sessions', existingSessionId, body, body);
+      if (saved?.id) {
+        res.setHeader('Set-Cookie', buildCookie(AUTH_SESSION_COOKIE, saved.id, { httpOnly: true }));
+      }
+      sendJson(res, 201, saved);
+      return;
+    }
+
+    if (pathname === '/api/auth/session' && req.method === 'DELETE') {
+      const cookies = parseCookies(req.headers.cookie || '');
+      const sessionId = cookies[AUTH_SESSION_COOKIE];
+      if (sessionId) {
+        try {
+          deleteRecord('auth_sessions', sessionId);
+        } catch {
+          // Ignore cleanup failures.
+        }
+      }
+      res.setHeader('Set-Cookie', buildCookie(AUTH_SESSION_COOKIE, '', { maxAge: 0, httpOnly: true }));
+      sendJson(res, 200, { ok: true });
       return;
     }
 

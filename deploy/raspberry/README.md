@@ -46,3 +46,4 @@ The app is designed to run as a single server process in production. The browser
 - Step-by-step checklist: [`CHECKLIST.md`](./CHECKLIST.md)
 - Pocket checklist: [`POCKETCHECKLIST.md`](./POCKETCHECKLIST.md)
 - Full deployment plan: [`../docs/deployment-plan.md`](../docs/deployment-plan.md)
+- Official workflow: [`../docs/official-flow.md`](../docs/official-flow.md)

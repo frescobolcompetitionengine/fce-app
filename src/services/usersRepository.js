@@ -1,4 +1,4 @@
-import { clone, sortItems } from './storage';
+import { clone, readJson, removeItem, sortItems, writeJson } from './storage';
 import { apiRequest, isServerStorageMode } from './apiClient';
 
 const USERS_KEY = 'frescobol_users_v1';
@@ -7,43 +7,16 @@ const MATCH_HISTORY_KEY = 'frescobol_match_history_v1';
 const GAME_SESSIONS_KEY = 'frescobol_game_sessions_v1';
 const SETTINGS_KEY = 'frescobol_settings_v1';
 
-function getSessionStore() {
-  if (typeof window === 'undefined') return null;
-  return window.sessionStorage;
-}
-
 function readCachedJson(key, fallback = []) {
-  const store = getSessionStore();
-  if (!store) return Array.isArray(fallback) ? [...fallback] : fallback;
-
-  try {
-    const sessionRaw = store.getItem(key);
-    if (sessionRaw) {
-      return JSON.parse(sessionRaw);
-    }
-
-    const legacyRaw = window.localStorage.getItem(key);
-    if (legacyRaw) {
-      store.setItem(key, legacyRaw);
-      window.localStorage.removeItem(key);
-      return JSON.parse(legacyRaw);
-    }
-    return Array.isArray(fallback) ? [...fallback] : fallback;
-  } catch {
-    return Array.isArray(fallback) ? [...fallback] : fallback;
-  }
+  return readJson(key, fallback);
 }
 
 function writeCachedJson(key, value) {
-  const store = getSessionStore();
-  if (!store) return;
-  store.setItem(key, JSON.stringify(value));
+  writeJson(key, value);
 }
 
 function removeCachedJson(key) {
-  const store = getSessionStore();
-  if (!store) return;
-  store.removeItem(key);
+  removeItem(key);
 }
 
 export function readLocalUsers() {

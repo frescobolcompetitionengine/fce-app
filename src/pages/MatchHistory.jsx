@@ -1,152 +1,21 @@
-import React, { useEffect, useRef, useState } from 'react';
+﻿import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Calendar, ChevronRight, Trash2, CheckSquare, Square, Download, FileText, Wand2 } from 'lucide-react';
 import { Navigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import MatchReport from '@/components/MatchReport';
-import jsPDF from 'jspdf';
 import { useI18n } from '@/lib/i18n';
 import { useAuth } from '@/lib/AuthContext';
-import { buildAthleteScoreBreakdown, calculateFrescobolRule2Score, getScoringModeDefaults } from '@/lib/scoring';
+import { formatMatchDateTime, getMatchStatus, getMatchTitle, getMatchVisibility } from '@/lib/matchPresentation';
+import { createSpeedScoreCalculator, resolveScoringConfiguration } from '@/lib/scoring';
+import { exportMatchCSV as exportMatchCSVHelper, exportMatchesCSV as exportMatchesCSVHelper, exportMatchesPDF as exportMatchesPDFHelper } from '@/lib/matchHistoryTools';
+import { filterMatchHistoryByOwner } from '@/lib/matchHistoryView';
+import { deleteSelectedMatchHistory, deleteSingleMatchHistory, openOrCreateDemoMatch, seedDemoMatchIfMissing } from '@/lib/matchHistoryActions';
 import PageShell from '@/components/PageShell';
 import { createMatchHistory, deleteMatchHistory, deleteManyMatchHistory, listMatchHistory } from '@/services/matchHistoryRepository';
 
-function formatDateTime(iso, language) {
-  if (!iso) return { date: '-', time: '-' };
-  const d = new Date(iso);
-  const date = d.toLocaleDateString(language);
-  const time = d.toLocaleTimeString(language, { hour: '2-digit', minute: '2-digit' });
-  return { date, time };
-}
-
-function getMatchTitle(match) {
-  return match?.duo_name || `${match?.left_name || '-'} - ${match?.right_name || '-'}`;
-}
-
-function getMatchStatus(match) {
-  return match?.game_status === 'live' ? 'live' : 'finished';
-}
-
-function getMatchVisibility(match) {
-  return match?.visibility === 'public' ? 'public' : 'private';
-}
-
-function makeCalculateScore(match) {
-  const scoringMode = match?.scoring_mode || 'option_1';
-  const minScoringSpeed = match?.min_scoring_speed ?? 50;
-  return (speedKmh) => {
-    if (speedKmh <= 0 || speedKmh < minScoringSpeed) return 0;
-    if (scoringMode === 'option_2') return Math.floor((speedKmh * (50 + speedKmh)) / 100);
-    return Math.floor((speedKmh * speedKmh) / 50);
-  };
-}
-
-function getTop150(hits) {
-  return [...hits].sort((a, b) => a.speed - b.speed).slice(-150);
-}
-
-function fmt(t) {
-  const mins = Math.floor(t / 60);
-  const secs = t % 60;
-  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-}
-
-function buildDemoHits(startMs, speeds, spacingMs = 160) {
-  return speeds.map((speed, index) => {
-    const timestampMs = startMs + index * spacingMs;
-    return {
-      speed,
-      timestampMs,
-      elapsedMs: timestampMs - startMs,
-      t: Number(((timestampMs - startMs) / 1000).toFixed(3)),
-    };
-  });
-}
-
-function buildDemoMatch(user, t) {
-  const now = Date.now();
-  const leftSpeeds = [52, 58, 67, 80, 96, 115, 138, 165, 198, 238, 120, 150];
-  const rightSpeeds = [54, 60, 72, 86, 103, 124, 149, 178, 212, 251, 130, 158];
-  const leftHits = [
-    ...buildDemoHits(now, leftSpeeds.slice(0, 10), 150),
-    ...buildDemoHits(now + 3200, leftSpeeds.slice(10), 180),
-  ];
-  const rightHits = [
-    ...buildDemoHits(now + 800, rightSpeeds.slice(0, 10), 150),
-    ...buildDemoHits(now + 4100, rightSpeeds.slice(10), 180),
-  ];
-  const calculateScore = (speedKmh) => calculateFrescobolRule2Score(speedKmh);
-  const leftBreakdown = buildAthleteScoreBreakdown(leftHits, calculateScore, { continuityEnabled: true, powerEnabled: true });
-  const rightBreakdown = buildAthleteScoreBreakdown(rightHits, calculateScore, { continuityEnabled: true, powerEnabled: true });
-  const ballDropEvents = [
-    { drop_number: 1, elapsed_seconds: 19, responsible_side: 'left', responsible_name: t('leftPlayer') },
-    { drop_number: 2, elapsed_seconds: 74, responsible_side: 'right', responsible_name: t('rightPlayer') },
-  ];
-
-  return {
-    demo_key: `fce-bonus-demo-v1-${user?.id || 'guest'}`,
-    is_demo: true,
-    played_at: new Date().toISOString(),
-    started_at: new Date(now - 90_000).toISOString(),
-    game_status: 'finished',
-    match_ended: true,
-    visibility: 'private',
-    duo_name: 'Demo de Bônus',
-    left_name: t('leftPlayer'),
-    right_name: t('rightPlayer'),
-    left_photo: '',
-    right_photo: '',
-    left_hits: leftHits,
-    right_hits: rightHits,
-    ball_drops: ballDropEvents.length,
-    ball_drop_events: ballDropEvents,
-    free_ball_drops: 5,
-    total_score: leftBreakdown.total + rightBreakdown.total,
-    scoring_mode: 'option_2',
-    min_scoring_speed: 50,
-    balance_enabled: true,
-    continuity_enabled: true,
-    power_enabled: true,
-    distance_meters: 10,
-    match_duration_minutes: 5,
-    warmup_duration_minutes: 5,
-    owner_user_id: user?.id,
-    owner_email: user?.email,
-  };
-}
-
 function exportCSV(match, t) {
-  const calc = makeCalculateScore(match);
-  const leftHits = match.left_hits || [];
-  const rightHits = match.right_hits || [];
-  const ballDropEvents = Array.isArray(match.ball_drop_events) ? match.ball_drop_events : [];
-  const freeBallDrops = match.free_ball_drops ?? 5;
-  const leftTop = new Set(getTop150(leftHits).map((h) => `${h.speed.toFixed(4)}_${h.t}`));
-  const rightTop = new Set(getTop150(rightHits).map((h) => `${h.speed.toFixed(4)}_${h.t}`));
-  const rows = [[t('player'), t('speedKmh'), t('timeMmSs'), t('points'), t('top150Ranking')]];
-
-  [...leftHits].sort((a, b) => b.speed - a.speed).forEach((hit) => {
-    const key = `${hit.speed.toFixed(4)}_${hit.t}`;
-    rows.push([match.left_name, hit.speed.toFixed(2), fmt(hit.t), calc(hit.speed), leftTop.has(key) ? t('yes') : t('no')]);
-  });
-  [...rightHits].sort((a, b) => b.speed - a.speed).forEach((hit) => {
-    const key = `${hit.speed.toFixed(4)}_${hit.t}`;
-    rows.push([match.right_name, hit.speed.toFixed(2), fmt(hit.t), calc(hit.speed), rightTop.has(key) ? t('yes') : t('no')]);
-  });
-  rows.push([]);
-  rows.push([t('totalScore'), match.total_score]);
-  rows.push([t('drops'), match.ball_drops ?? 0]);
-  const penaltyDrops = Math.max(0, (match.ball_drops ?? 0) - freeBallDrops);
-  const penalty = penaltyDrops > 0 ? `${(100 - Math.pow(0.97, penaltyDrops) * 100).toFixed(1)}%` : '0%';
-  rows.push([t('dropDiscount'), penalty]);
-  rows.push([]);
-  rows.push([t('ballDropList'), t('timeMmSs'), t('responsible')]);
-  ballDropEvents.forEach((drop, index) => {
-    const responsible = drop?.responsible_name || (drop?.responsible_side === 'left' ? match.left_name : drop?.responsible_side === 'right' ? match.right_name : t('unknown'));
-    rows.push([`#${Number.isFinite(drop?.drop_number) ? drop.drop_number : index + 1}`, fmt(Number.isFinite(drop?.elapsed_seconds) ? drop.elapsed_seconds : 0), responsible || t('unknown')]);
-  });
-
-  const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n');
+  const csv = exportMatchCSVHelper(match, t);
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -157,12 +26,7 @@ function exportCSV(match, t) {
 }
 
 function exportMultipleCSV(matches, t, language) {
-  const rows = [[t('date'), t('hour'), t('leftPlayerShort'), t('rightPlayerShort'), t('totalScoreLabel'), t('drops'), t('hits')]];
-  matches.forEach((match) => {
-    const { date, time } = formatDateTime(match.played_at, language);
-    rows.push([date, time, match.left_name, match.right_name, match.total_score, match.ball_drops ?? 0, (match.left_hits?.length ?? 0) + (match.right_hits?.length ?? 0)]);
-  });
-  const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n');
+  const csv = exportMatchesCSVHelper(matches, t, language);
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -173,57 +37,7 @@ function exportMultipleCSV(matches, t, language) {
 }
 
 async function exportMultiplePDF(matches, t, language) {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  const W = 210;
-  const margin = 14;
-  /** @type {[number, number, number]} */
-  const teal = [15, 155, 142];
-  /** @type {[number, number, number]} */
-  const dark = [13, 13, 26];
-  doc.setFillColor(...dark);
-  doc.rect(0, 0, W, 297, 'F');
-  doc.setFillColor(...teal);
-  doc.rect(0, 0, W, 18, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(13);
-  doc.setFont('helvetica', 'bold');
-  doc.text(t('historyTitle'), W / 2, 12, { align: 'center' });
-
-  let y = 28;
-  doc.setFillColor(...teal);
-  doc.rect(margin, y, W - margin * 2, 7, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(7);
-  doc.setFont('helvetica', 'bold');
-  doc.text(t('date'), margin + 2, y + 5);
-  doc.text(t('duo'), margin + 28, y + 5);
-  doc.text(t('points'), margin + 100, y + 5);
-  doc.text(t('drops'), margin + 130, y + 5);
-  doc.text(t('hits'), margin + 155, y + 5);
-  y += 8;
-
-  matches.forEach((match, i) => {
-    if (y > 280) {
-      doc.addPage();
-      doc.setFillColor(...dark);
-      doc.rect(0, 0, W, 297, 'F');
-      y = 14;
-    }
-    const { date, time } = formatDateTime(match.played_at, language);
-    doc.setFillColor(i % 2 === 0 ? 22 : 30, i % 2 === 0 ? 33 : 30, i % 2 === 0 ? 62 : 40);
-    doc.rect(margin, y, W - margin * 2, 6, 'F');
-    doc.setTextColor(180, 180, 200);
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`${date} ${time}`, margin + 2, y + 4);
-    doc.text(`${match.left_name} & ${match.right_name}`, margin + 28, y + 4);
-    doc.setTextColor(...teal);
-    doc.text(`${match.total_score?.toLocaleString()}`, margin + 100, y + 4);
-    doc.setTextColor(180, 180, 200);
-    doc.text(`${match.ball_drops ?? 0}`, margin + 130, y + 4);
-    doc.text(`${(match.left_hits?.length ?? 0) + (match.right_hits?.length ?? 0)}`, margin + 155, y + 4);
-    y += 6;
-  });
+  const doc = exportMatchesPDFHelper(matches, t, language);
   doc.save('match-history.pdf');
 }
 
@@ -246,12 +60,7 @@ export default function MatchHistory() {
     queryFn: () => listMatchHistory('-played_at', 100),
   });
 
-  const matches = allMatches.filter((m) => {
-    if (!isAdmin) return m.owner_user_id === user?.id;
-    if (selectedOwner === 'all') return true;
-    if (selectedOwner === 'mine') return m.owner_user_id === user?.id;
-    return m.owner_user_id === selectedOwner;
-  });
+  const matches = filterMatchHistoryByOwner(allMatches, { isAdmin, selectedOwner, userId: user?.id });
 
   const toggleSelect = (id) => {
     setSelectedIds((prev) => {
@@ -267,64 +76,48 @@ export default function MatchHistory() {
     else setSelectedIds(new Set(matches.map((m) => m.id)));
   };
 
-  const deleteMatch = async (id) => {
-    await deleteMatchHistory(id);
-    queryClient.invalidateQueries({ queryKey: ['matchHistory'] });
-  };
+  const deleteMatch = (id) => deleteSingleMatchHistory({ id, deleteMatchHistory, queryClient });
 
-  const deleteSelected = async () => {
-    setDeleting(true);
-    await deleteManyMatchHistory([...selectedIds]);
-    setSelectedIds(new Set());
-    setSelectionMode(false);
-    queryClient.invalidateQueries({ queryKey: ['matchHistory'] });
-    setDeleting(false);
-  };
+  const deleteSelected = () => deleteSelectedMatchHistory({
+    selectedIds,
+    deleteManyMatchHistory,
+    queryClient,
+    setSelectedIds,
+    setSelectionMode,
+    setDeleting,
+  });
 
-  const createDemoReport = async () => {
-    setCreatingDemo(true);
-    try {
-      const existingDemo = allMatches.find((match) => match?.owner_user_id === user?.id && String(match?.demo_key || '').startsWith('fce-bonus-demo-v1-'));
-      if (existingDemo) {
-        setSelected(existingDemo);
-        setShowReport(true);
-        return;
-      }
-
-      const demoMatch = buildDemoMatch(user, t);
-      const created = await createMatchHistory(demoMatch);
-      await queryClient.invalidateQueries({ queryKey: ['matchHistory'] });
-      setSelected(created);
-      setShowReport(true);
-    } finally {
-      setCreatingDemo(false);
-    }
-  };
+  const createDemoReport = () => openOrCreateDemoMatch({
+    allMatches,
+    user,
+    t,
+    createMatchHistory,
+    queryClient,
+    setSelected,
+    setShowReport,
+    setCreatingDemo,
+  });
 
   useEffect(() => {
     if (isLoading || isSpectator || !user?.id || demoSeededRef.current) return;
 
-    const existingDemo = allMatches.find((match) => match?.owner_user_id === user?.id && String(match?.demo_key || '').startsWith('fce-bonus-demo-v1-'));
-    if (existingDemo) {
-      demoSeededRef.current = true;
-      setSelected(existingDemo);
-      setShowReport(true);
-      return;
-    }
-
-    demoSeededRef.current = true;
     (async () => {
       try {
-        const demoMatch = buildDemoMatch(user, t);
-        const created = await createMatchHistory(demoMatch);
-        await queryClient.invalidateQueries({ queryKey: ['matchHistory'] });
-        setSelected(created);
-        setShowReport(true);
+        await seedDemoMatchIfMissing({
+          allMatches,
+          user,
+          t,
+          createMatchHistory,
+          queryClient,
+          setSelected,
+          setShowReport,
+          demoSeededRef,
+        });
       } catch (error) {
         console.error('Failed to seed demo match:', error);
       }
     })();
-  }, [allMatches, isLoading, isSpectator, queryClient, t, user?.id]);
+  }, [allMatches, createMatchHistory, isLoading, isSpectator, queryClient, t, user, setSelected, setShowReport]);
 
   if (isLoading) {
     return <div className="min-h-[100dvh] bg-gradient-to-b from-[#1a1a2e] to-[#0d0d1a] flex items-center justify-center"><div className="animate-spin w-8 h-8 border-4 border-[#0f9b8e] border-t-transparent rounded-full" /></div>;
@@ -334,8 +127,8 @@ export default function MatchHistory() {
     return <Navigate to={createPageUrl('SpectatorHub')} replace />;
   }
 
-  const dt = selected ? formatDateTime(selected.played_at, language) : null;
-  const selectedScoringModeDefaults = selected ? getScoringModeDefaults(selected.scoring_mode || 'option_1') : getScoringModeDefaults('option_1');
+  const dt = selected ? formatMatchDateTime(selected.played_at, language) : null;
+  const selectedScoringConfig = resolveScoringConfiguration(selected?.scoring_mode || 'option_1', selected?.min_scoring_speed ?? 50);
 
   return (
     <PageShell
@@ -370,7 +163,7 @@ export default function MatchHistory() {
         <div className="space-y-3 max-w-lg mx-auto">
           {isAdmin && (
             <div className="bg-[#16213e] border border-[#2a2a4a] rounded-xl p-3">
-              <label className="text-xs text-gray-400">Filtro de usuário.</label>
+              <label className="text-xs text-gray-400">Filtro de usuÃ¡rio.</label>
               <select value={selectedOwner} onChange={(e) => setSelectedOwner(e.target.value)} className="mt-1 w-full h-10 rounded-lg bg-[#0d0d1a] border border-[#3a3a5a] px-2 text-sm">
                 <option value="mine">Meus jogos.</option>
                 <option value="all">Todos os jogos.</option>
@@ -392,7 +185,7 @@ export default function MatchHistory() {
           </button>
           {matches.length === 0 && <div className="text-center text-gray-500 mt-16"><Calendar className="w-12 h-12 mx-auto mb-3 opacity-30" /><p>{t('noMatchesYet')}</p></div>}
           {matches.map((match) => {
-            const { date, time } = formatDateTime(match.played_at, language);
+            const { date, time } = formatMatchDateTime(match.played_at, language);
             const isChecked = selectedIds.has(match.id);
             return (
               <div key={match.id} className={`w-full bg-[#16213e] border rounded-2xl p-4 flex items-center gap-3 transition-colors ${isChecked ? 'border-[#0f9b8e]' : 'border-[#2a2a4a]'}`}>
@@ -463,9 +256,9 @@ export default function MatchHistory() {
           totalScore={selected.total_score || 0}
           ballDrops={selected.ball_drops || 0}
           freeBallDrops={selected.free_ball_drops ?? 5}
-          calculateScore={makeCalculateScore(selected)}
-          continuityEnabled={selected.continuity_enabled ?? selectedScoringModeDefaults.continuity_enabled}
-          powerEnabled={selected.power_enabled ?? selectedScoringModeDefaults.power_enabled}
+          calculateScore={createSpeedScoreCalculator(selected?.scoring_mode || 'option_1', selected?.min_scoring_speed ?? 50)}
+          continuityEnabled={selected.continuity_enabled ?? selectedScoringConfig.continuityEnabled}
+          powerEnabled={selected.power_enabled ?? selectedScoringConfig.powerEnabled}
           matchStatus={getMatchStatus(selected)}
           visibility={getMatchVisibility(selected)}
           duoName={getMatchTitle(selected)}
@@ -475,4 +268,5 @@ export default function MatchHistory() {
     </PageShell>
   );
 }
+
 

@@ -1,6 +1,6 @@
 ﻿import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Settings as SettingsIcon, History, ShieldCheck } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { useQuery } from '@tanstack/react-query';
 import Timer from '@/components/Timer';
@@ -14,31 +14,44 @@ import MatchReport from '@/components/MatchReport';
 import { playSpeedSound, playClickSound, playWarmupEndSound } from '@/lib/speedSounds';
 import { useI18n } from '@/lib/i18n';
 import { useAuth } from '@/lib/AuthContext';
+import { isGameSessionActive } from '@/lib/gameSessionState';
+import {
+  buildSpeedMeterSessionPayload,
+  resolveSpeedMeterSessionHydration,
+  resolveSpeedMeterSessionStatus,
+} from '@/lib/speedMeterSession';
+import { createBallDropEvent, createPassOutcome } from '@/lib/speedMeterGameplay';
+import {
+  completeWarmup as completeWarmupClock,
+  getClockElapsedMs,
+  getClockRemainingSeconds,
+  getWarmupRemainingSeconds as getWarmupRemainingSecondsClock,
+  pauseClock as pauseClockClock,
+  pauseWarmupClock as pauseWarmupClockClock,
+  resetClock as resetClockClock,
+  resetWarmupClock as resetWarmupClockClock,
+  startClock as startClockClock,
+  startWarmupClock as startWarmupClockClock,
+} from '@/lib/speedMeterClock';
+import {
+  canInteractWithSpeedMeter,
+  canResumeClock,
+  hasWarmupInProgress,
+  isWarmupControlsActive,
+  shouldPersistSpeedMeterMatch,
+  shouldScheduleSpeedMeterSessionSave,
+  shouldLockWarmupControls,
+} from '@/lib/speedMeterState';
+import { buildSpeedMeterMatchPayload } from '@/lib/speedMeterMatch';
 import { listenTournamentControl } from '@/lib/tournamentControlBus';
-import { computeAthleteScore, getScoringModeDefaults } from '@/lib/scoring';
-import { createSettings, listSettings } from '@/services/settingsRepository';
+import { applyBalanceRule, computeAthleteScore, createSpeedScoreCalculator, resolveScoringConfiguration } from '@/lib/scoring';
+import { loadLatestSettingsForUser, SETTINGS_PROFILE_DEFAULTS } from '@/services/settingsRepository';
 import { createMatchHistory, deleteMatchHistory, updateMatchHistory } from '@/services/matchHistoryRepository';
 import { createGameSession, clearActiveGameSessions, finalizeGameSession, getLatestGameSession, updateGameSession } from '@/services/gameSessionRepository';
 
 const DEFAULT_SETTINGS = {
-  distance_meters: 10,
+  ...SETTINGS_PROFILE_DEFAULTS,
   match_duration_minutes: 5,
-  warmup_duration_minutes: 5,
-  player_left_name: '',
-  player_right_name: '',
-  player_left_photo: '',
-  player_right_photo: '',
-  player_left_radar_enabled: false,
-  player_right_radar_enabled: false,
-  free_ball_drops: 5,
-  max_ball_drops: 20,
-  count_ball_drops: true,
-  scoring_mode: 'option_1',
-  balance_enabled: true,
-  continuity_enabled: false,
-  power_enabled: false,
-  min_scoring_speed: 50,
-  language: 'pt-BR',
 };
 
 const GENERIC_TEAM_NAME_PATTERN = /^[A-Z]{3}\s[A-Z]\s&\s[A-Z]{3}\s[A-Z]$/;
@@ -53,6 +66,7 @@ const normalizeDisplayedValue = (value, pattern) => {
 export default function SpeedMeter({ displayMode = 'full' }) {
   const { t } = useI18n();
   const { user, isSpectator, logout } = useAuth();
+  const location = useLocation();
   const isEmbedded = displayMode !== 'full';
   const [timeLeft, setTimeLeft] = useState(5 * 60);
   const [isRunning, setIsRunning] = useState(false);
@@ -94,22 +108,11 @@ export default function SpeedMeter({ displayMode = 'full' }) {
   const sessionSaveTimerRef = useRef(null);
   const timerTickRef = useRef(null);
 
-  const getLatestSettings = async () => {
-    const all = await listSettings('-updated_at', 500);
-    const mine = all.filter((s) => s.owner_user_id === user?.id);
-    if (mine.length > 0) return mine[0];
-    return null;
-  };
-
   const { data: settings } = useQuery({
     queryKey: ['settings'],
     queryFn: async () => {
       try {
-        const latest = await getLatestSettings();
-        if (!latest) {
-          return await createSettings({ ...DEFAULT_SETTINGS, owner_user_id: user?.id, owner_email: user?.email });
-        }
-        return latest;
+        return await loadLatestSettingsForUser(user?.id, user?.email);
       } catch (error) {
         console.warn('Using local fallback settings:', error);
         return DEFAULT_SETTINGS;
@@ -136,79 +139,94 @@ export default function SpeedMeter({ displayMode = 'full' }) {
   const freeBallDrops = effectiveSettings.free_ball_drops ?? 5;
   const maxBallDrops = effectiveSettings.max_ball_drops ?? 20;
   const countBallDrops = effectiveSettings.count_ball_drops ?? true;
-  const scoringMode = effectiveSettings.scoring_mode || 'option_1';
-  const scoringModeDefaults = getScoringModeDefaults(scoringMode);
-  const balanceEnabled = effectiveSettings.balance_enabled ?? scoringModeDefaults.balance_enabled;
-  const continuityEnabled = effectiveSettings.continuity_enabled ?? scoringModeDefaults.continuity_enabled;
-  const powerEnabled = effectiveSettings.power_enabled ?? scoringModeDefaults.power_enabled;
-  const minScoringSpeed = effectiveSettings.min_scoring_speed ?? 50;
+  const scoringConfig = useMemo(() => resolveScoringConfiguration(
+    effectiveSettings.scoring_mode || 'option_1',
+    effectiveSettings.min_scoring_speed ?? 50,
+    {
+      balanceEnabled: effectiveSettings.balance_enabled,
+      continuityEnabled: effectiveSettings.continuity_enabled,
+      powerEnabled: effectiveSettings.power_enabled,
+    },
+  ), [
+    effectiveSettings.scoring_mode,
+    effectiveSettings.min_scoring_speed,
+    effectiveSettings.balance_enabled,
+    effectiveSettings.continuity_enabled,
+    effectiveSettings.power_enabled,
+  ]);
+  const {
+    scoringMode,
+    minScoringSpeed,
+    balanceEnabled,
+    continuityEnabled,
+    powerEnabled,
+  } = scoringConfig;
 
-  const getElapsedClockMs = useCallback((nowMs = Date.now()) => {
-    const startedAt = clockStartedAtRef.current;
-    const runningElapsed = startedAt ? Math.max(0, nowMs - startedAt) : 0;
-    return clockAccumulatedMsRef.current + runningElapsed;
-  }, []);
+  const warmupInProgress = hasWarmupInProgress({
+    warmupStartedAtMs: warmupStartedAtRef.current,
+    warmupAccumulatedMs: warmupAccumulatedMsRef.current,
+  });
+  const warmupControlsActive = isWarmupControlsActive({
+    isWarmupRunning,
+    isWarmupCompleted,
+    warmupStartedAtMs: warmupStartedAtRef.current,
+    warmupAccumulatedMs: warmupAccumulatedMsRef.current,
+  });
+  const warmupControlsLocked = shouldLockWarmupControls({
+    isWarmupCompleted,
+    warmupStartedAtMs: warmupStartedAtRef.current,
+    warmupAccumulatedMs: warmupAccumulatedMsRef.current,
+  });
 
-  const getRemainingClockSeconds = useCallback((nowMs = Date.now()) => {
-    const elapsedMs = getElapsedClockMs(nowMs);
-    return Math.max(0, Math.ceil((matchDurationMs - elapsedMs) / 1000));
-  }, [getElapsedClockMs, matchDurationMs]);
+  const clockRefs = useMemo(() => ({
+    clockStartedAtRef,
+    clockAccumulatedMsRef,
+    warmupStartedAtRef,
+    warmupAccumulatedMsRef,
+  }), []);
 
-  const startClock = useCallback((nowMs = Date.now()) => {
-    if (clockStartedAtRef.current == null) {
-      clockStartedAtRef.current = nowMs;
-    }
-  }, []);
+  const getElapsedClockMs = useCallback((nowMs = Date.now()) => getClockElapsedMs({
+    clockStartedAtMs: clockStartedAtRef.current,
+    clockAccumulatedMs: clockAccumulatedMsRef.current,
+    nowMs,
+  }), []);
 
-  const pauseClock = useCallback((nowMs = Date.now()) => {
-    if (clockStartedAtRef.current == null) return;
-    clockAccumulatedMsRef.current += Math.max(0, nowMs - clockStartedAtRef.current);
-    clockStartedAtRef.current = null;
-  }, []);
+  const getRemainingClockSeconds = useCallback((nowMs = Date.now()) => getClockRemainingSeconds({
+    matchDurationMs,
+    clockStartedAtMs: clockStartedAtRef.current,
+    clockAccumulatedMs: clockAccumulatedMsRef.current,
+    nowMs,
+  }), [matchDurationMs]);
 
-  const resetClock = useCallback(() => {
-    clockStartedAtRef.current = null;
-    clockAccumulatedMsRef.current = 0;
-  }, []);
+  const startClock = useCallback((nowMs = Date.now()) => startClockClock(clockRefs, nowMs), [clockRefs]);
 
-  const getWarmupElapsedMs = useCallback((nowMs = Date.now()) => {
-    const startedAt = warmupStartedAtRef.current;
-    const runningElapsed = startedAt ? Math.max(0, nowMs - startedAt) : 0;
-    return warmupAccumulatedMsRef.current + runningElapsed;
-  }, []);
+  const pauseClock = useCallback((nowMs = Date.now()) => pauseClockClock(clockRefs, nowMs), [clockRefs]);
 
-  const getWarmupRemainingSeconds = useCallback((nowMs = Date.now()) => {
-    const elapsedMs = getWarmupElapsedMs(nowMs);
-    return Math.max(0, Math.ceil((warmupDurationMs - elapsedMs) / 1000));
-  }, [getWarmupElapsedMs, warmupDurationMs]);
+  const resetClock = useCallback(() => resetClockClock(clockRefs), [clockRefs]);
 
-  const startWarmupClock = useCallback((nowMs = Date.now()) => {
-    if (warmupStartedAtRef.current == null) {
-      warmupStartedAtRef.current = nowMs;
-    }
-  }, []);
+  const getWarmupRemainingSeconds = useCallback((nowMs = Date.now()) => getWarmupRemainingSecondsClock({
+    warmupDurationMs,
+    warmupStartedAtMs: warmupStartedAtRef.current,
+    warmupAccumulatedMs: warmupAccumulatedMsRef.current,
+    nowMs,
+  }), [warmupDurationMs]);
 
-  const pauseWarmupClock = useCallback((nowMs = Date.now()) => {
-    if (warmupStartedAtRef.current == null) return;
-    warmupAccumulatedMsRef.current += Math.max(0, nowMs - warmupStartedAtRef.current);
-    warmupStartedAtRef.current = null;
-  }, []);
+  const startWarmupClock = useCallback((nowMs = Date.now()) => startWarmupClockClock(clockRefs, nowMs), [clockRefs]);
 
-  const resetWarmupClock = useCallback(() => {
-    warmupStartedAtRef.current = null;
-    warmupAccumulatedMsRef.current = 0;
-    setWarmupTimeLeft(warmupDuration);
-    setIsWarmupRunning(false);
-    setIsWarmupCompleted(false);
-    setIsWarmupModalOpen(false);
-  }, [warmupDuration]);
+  const pauseWarmupClock = useCallback((nowMs = Date.now()) => pauseWarmupClockClock(clockRefs, nowMs), [clockRefs]);
 
-  const completeWarmup = useCallback((nowMs = Date.now()) => {
-    pauseWarmupClock(nowMs);
-    setWarmupTimeLeft(0);
-    setIsWarmupRunning(false);
-    setIsWarmupCompleted(true);
-  }, [pauseWarmupClock]);
+  const resetWarmupClock = useCallback(() => resetWarmupClockClock(clockRefs, warmupDuration, {
+    setWarmupTimeLeft,
+    setIsWarmupRunning,
+    setIsWarmupCompleted,
+    setIsWarmupModalOpen,
+  }), [clockRefs, warmupDuration]);
+
+  const completeWarmup = useCallback((nowMs = Date.now()) => completeWarmupClock(clockRefs, {
+    setWarmupTimeLeft,
+    setIsWarmupRunning,
+    setIsWarmupCompleted,
+  }, nowMs), [clockRefs]);
 
   const clearWarmupFinishTimer = useCallback(() => {
     if (warmupFinishTimerRef.current != null) {
@@ -222,94 +240,96 @@ export default function SpeedMeter({ displayMode = 'full' }) {
     setIsWarmupModalOpen(false);
   }, [clearWarmupFinishTimer]);
 
-  const serializeLiveSession = useCallback((status = isWarmupRunning ? 'warmup' : (matchEnded ? 'finished' : (isRunning ? 'live' : 'paused'))) => ({
-    id: liveMatchId || undefined,
-    game_status: status,
-    owner_user_id: user?.id,
-    owner_email: user?.email,
-    time_left: getRemainingClockSeconds(),
-    is_running: isRunning,
-    game_started: gameStarted,
-    match_ended: matchEnded,
-    ball_drops: ballDrops,
-    ball_drop_events: ballDropEvents,
-    rest_time_left: restTimeLeft,
-    is_resting: isResting,
-    warmup_time_left: warmupTimeLeft,
-    is_warming_up: isWarmupRunning,
-    warmup_completed: isWarmupCompleted,
-    warmup_started_at_ms: warmupStartedAtRef.current,
-    warmup_accumulated_ms: warmupAccumulatedMsRef.current,
-    warmup_duration_minutes: warmupDurationMinutes,
-    clock_started_at_ms: clockStartedAtRef.current,
-    clock_accumulated_ms: clockAccumulatedMsRef.current,
-    left_hits: leftHits,
-    right_hits: rightHits,
-    left_current_speed: leftCurrentSpeed,
-    right_current_speed: rightCurrentSpeed,
-    last_press_time: lastPressTime,
-    last_press_side: lastPressSide,
-    last_left_speed: lastLeftSpeed,
-    last_right_speed: lastRightSpeed,
-    game_elapsed_seconds: gameElapsed.current,
-    left_name: leftName,
-    right_name: rightName,
-    left_photo: leftPhoto,
-    right_photo: rightPhoto,
-    player_left_radar_enabled: leftRadarEnabled,
-    player_right_radar_enabled: rightRadarEnabled,
-    duo_name: duoName,
-    visibility,
-    distance_meters: distance,
-    match_duration_minutes: effectiveSettings.match_duration_minutes || 5,
-    scoring_mode: scoringMode,
-    balance_enabled: balanceEnabled,
-    continuity_enabled: continuityEnabled,
-    power_enabled: powerEnabled,
-    min_scoring_speed: minScoringSpeed,
-    count_ball_drops: countBallDrops,
-    free_ball_drops: freeBallDrops,
-  }), [
+  const serializeLiveSession = useCallback((status = resolveSpeedMeterSessionStatus({ isWarmupRunning, matchEnded, isRunning })) => buildSpeedMeterSessionPayload({
+    status,
     liveMatchId,
-    user?.id,
-    user?.email,
-    isRunning,
-    gameStarted,
-    matchEnded,
-    ballDrops,
+    user,
+    state: {
+      isRunning,
+      gameStarted,
+      matchEnded,
+      ballDrops,
+      ballDropEvents,
+      restTimeLeft,
+      isResting,
+      warmupTimeLeft,
+      isWarmupRunning,
+      isWarmupCompleted,
+      leftHits,
+      rightHits,
+      leftCurrentSpeed,
+      rightCurrentSpeed,
+      lastPressTime,
+      lastPressSide,
+      lastLeftSpeed,
+      lastRightSpeed,
+      gameElapsedSeconds: gameElapsed.current,
+    },
+    refs: {
+      warmupStartedAtMs: warmupStartedAtRef.current,
+      warmupAccumulatedMs: warmupAccumulatedMsRef.current,
+      clockStartedAtMs: clockStartedAtRef.current,
+      clockAccumulatedMs: clockAccumulatedMsRef.current,
+    },
+    derived: {
+      getRemainingClockSeconds,
+      warmupDurationMinutes,
+      leftName,
+      rightName,
+      leftPhoto,
+      rightPhoto,
+      leftRadarEnabled,
+      rightRadarEnabled,
+      duoName,
+      visibility,
+      distance,
+      matchDurationMinutes: effectiveSettings.match_duration_minutes || 5,
+      scoringMode,
+      balanceEnabled,
+      continuityEnabled,
+      powerEnabled,
+      minScoringSpeed,
+      countBallDrops,
+      freeBallDrops,
+    },
+  }), [
     ballDropEvents,
-    restTimeLeft,
-    isResting,
-    warmupTimeLeft,
-    isWarmupRunning,
-    isWarmupCompleted,
-    leftHits,
-    rightHits,
-    leftCurrentSpeed,
-    rightCurrentSpeed,
-    lastPressTime,
-    lastPressSide,
-    lastLeftSpeed,
-    lastRightSpeed,
-    leftName,
-    rightName,
-    leftPhoto,
-    rightPhoto,
-    leftRadarEnabled,
-    rightRadarEnabled,
-    duoName,
-    visibility,
-    distance,
-    effectiveSettings.match_duration_minutes,
-    scoringMode,
+    ballDrops,
     balanceEnabled,
     continuityEnabled,
-    powerEnabled,
-    minScoringSpeed,
     countBallDrops,
+    duoName,
+    effectiveSettings.match_duration_minutes,
     freeBallDrops,
-    warmupDurationMinutes,
+    gameStarted,
     getRemainingClockSeconds,
+    isResting,
+    isWarmupCompleted,
+    isWarmupRunning,
+    isRunning,
+    lastLeftSpeed,
+    lastPressSide,
+    lastPressTime,
+    leftCurrentSpeed,
+    leftHits,
+    leftName,
+    leftPhoto,
+    leftRadarEnabled,
+    liveMatchId,
+    matchEnded,
+    minScoringSpeed,
+    powerEnabled,
+    restTimeLeft,
+    rightCurrentSpeed,
+    rightHits,
+    rightName,
+    rightPhoto,
+    rightRadarEnabled,
+    scoringMode,
+    user,
+    visibility,
+    warmupDurationMinutes,
+    warmupTimeLeft,
   ]);
 
   const saveLiveSession = useCallback(async (status) => {
@@ -343,10 +363,10 @@ export default function SpeedMeter({ displayMode = 'full' }) {
   }, [gameStarted, resetClock, settings?.match_duration_minutes]);
 
   useEffect(() => {
-    if (warmupStartedAtRef.current == null && warmupAccumulatedMsRef.current === 0 && !isWarmupCompleted) {
+    if (!warmupInProgress && !isWarmupCompleted) {
       setWarmupTimeLeft(warmupDuration);
     }
-  }, [isWarmupCompleted, warmupDuration]);
+  }, [isWarmupCompleted, warmupDuration, warmupInProgress]);
 
   useEffect(() => {
     let cancelled = false;
@@ -363,60 +383,54 @@ export default function SpeedMeter({ displayMode = 'full' }) {
         const activeSession = await getLatestGameSession(user.id);
         if (cancelled) return;
 
-        if (!activeSession) {
+        if (!isGameSessionActive(activeSession)) {
           resetClock();
           resetWarmupClock();
           setIsHydratingSession(false);
           return;
         }
 
-        setLiveMatchId(activeSession.id);
-        setTimeLeft(activeSession.time_left ?? settings.match_duration_minutes * 60);
-        setIsRunning(Boolean(activeSession.is_running));
-        setGameStarted(Boolean(activeSession.game_started ?? true));
-        setMatchEnded(Boolean(activeSession.match_ended));
-        setBallDrops(activeSession.ball_drops ?? 0);
-        setBallDropEvents(Array.isArray(activeSession.ball_drop_events) ? activeSession.ball_drop_events : []);
-        setRestTimeLeft(activeSession.rest_time_left ?? 90);
-        setIsResting(Boolean(activeSession.is_resting));
-        setLeftHits(Array.isArray(activeSession.left_hits) ? activeSession.left_hits : []);
-        setRightHits(Array.isArray(activeSession.right_hits) ? activeSession.right_hits : []);
-        setLeftCurrentSpeed(activeSession.left_current_speed ?? 0);
-        setRightCurrentSpeed(activeSession.right_current_speed ?? 0);
-        setLastPressTime(activeSession.last_press_time ?? null);
-        setLastPressSide(activeSession.last_press_side ?? null);
-        setLastLeftSpeed(activeSession.last_left_speed ?? 0);
-        setLastRightSpeed(activeSession.last_right_speed ?? 0);
-        gameElapsed.current = activeSession.game_elapsed_seconds ?? 0;
-        setWarmupTimeLeft(activeSession.warmup_time_left ?? warmupDuration);
-        setIsWarmupRunning(Boolean(activeSession.is_warming_up));
-        setIsWarmupCompleted(Boolean(activeSession.warmup_completed));
+        const hydrated = resolveSpeedMeterSessionHydration(activeSession, {
+          defaultMatchDurationMinutes: settings.match_duration_minutes ?? 5,
+          defaultWarmupDurationMinutes: warmupDurationMinutes,
+          getRemainingClockSeconds,
+          getWarmupRemainingSeconds,
+          matchDurationMs,
+          warmupDuration,
+        });
 
-        const hasClockMetadata = activeSession.clock_accumulated_ms != null || activeSession.clock_started_at_ms != null;
-        if (hasClockMetadata) {
-          clockAccumulatedMsRef.current = Number(activeSession.clock_accumulated_ms ?? 0) || 0;
-          const startedAt = Number(activeSession.clock_started_at_ms);
-          clockStartedAtRef.current = Number.isFinite(startedAt) && startedAt > 0 ? startedAt : null;
-          setTimeLeft(getRemainingClockSeconds());
-        } else {
-          const fallbackTimeLeft = Number(activeSession.time_left ?? settings.match_duration_minutes * 60);
-          clockAccumulatedMsRef.current = Math.max(0, matchDurationMs - Math.max(0, fallbackTimeLeft) * 1000);
-          clockStartedAtRef.current = activeSession.is_running ? Date.now() : null;
-          setTimeLeft(activeSession.is_running ? getRemainingClockSeconds() : Math.max(0, fallbackTimeLeft));
+        if (!hydrated) {
+          resetClock();
+          resetWarmupClock();
+          setIsHydratingSession(false);
+          return;
         }
 
-        const hasWarmupMetadata = activeSession.warmup_accumulated_ms != null || activeSession.warmup_started_at_ms != null;
-        if (hasWarmupMetadata) {
-          warmupAccumulatedMsRef.current = Math.max(0, Number(activeSession.warmup_accumulated_ms ?? 0) || 0);
-          const warmupStartedAt = Number(activeSession.warmup_started_at_ms);
-          warmupStartedAtRef.current = Boolean(activeSession.is_warming_up) && Number.isFinite(warmupStartedAt) && warmupStartedAt > 0 ? warmupStartedAt : null;
-          const fallbackWarmupTimeLeft = Number(activeSession.warmup_time_left ?? warmupDuration);
-          setWarmupTimeLeft(Boolean(activeSession.is_warming_up) ? getWarmupRemainingSeconds() : Math.max(0, fallbackWarmupTimeLeft));
-        } else {
-          warmupAccumulatedMsRef.current = 0;
-          warmupStartedAtRef.current = null;
-          setWarmupTimeLeft(warmupDuration);
-        }
+        setLiveMatchId(hydrated.liveMatchId);
+        setTimeLeft(hydrated.timeLeft);
+        setIsRunning(hydrated.isRunning);
+        setGameStarted(hydrated.gameStarted);
+        setMatchEnded(hydrated.matchEnded);
+        setBallDrops(hydrated.ballDrops);
+        setBallDropEvents(hydrated.ballDropEvents);
+        setRestTimeLeft(hydrated.restTimeLeft);
+        setIsResting(hydrated.isResting);
+        setLeftHits(hydrated.leftHits);
+        setRightHits(hydrated.rightHits);
+        setLeftCurrentSpeed(hydrated.leftCurrentSpeed);
+        setRightCurrentSpeed(hydrated.rightCurrentSpeed);
+        setLastPressTime(hydrated.lastPressTime);
+        setLastPressSide(hydrated.lastPressSide);
+        setLastLeftSpeed(hydrated.lastLeftSpeed);
+        setLastRightSpeed(hydrated.lastRightSpeed);
+        gameElapsed.current = hydrated.gameElapsedSeconds;
+        setWarmupTimeLeft(hydrated.warmupTimeLeft);
+        setIsWarmupRunning(hydrated.isWarmupRunning);
+        setIsWarmupCompleted(hydrated.isWarmupCompleted);
+        clockAccumulatedMsRef.current = hydrated.refs.clockAccumulatedMs;
+        clockStartedAtRef.current = hydrated.refs.clockStartedAtMs;
+        warmupAccumulatedMsRef.current = hydrated.refs.warmupAccumulatedMs;
+        warmupStartedAtRef.current = hydrated.refs.warmupStartedAtMs;
       } finally {
         if (!cancelled) {
           setIsHydratingSession(false);
@@ -427,15 +441,9 @@ export default function SpeedMeter({ displayMode = 'full' }) {
     return () => {
       cancelled = true;
     };
-  }, [getRemainingClockSeconds, getWarmupRemainingSeconds, isSpectator, matchDurationMs, resetClock, settings?.id, settings?.match_duration_minutes, user?.id, warmupDuration]);
+  }, [getRemainingClockSeconds, getWarmupRemainingSeconds, isSpectator, matchDurationMs, resetClock, resetWarmupClock, settings?.id, settings?.match_duration_minutes, user?.id, warmupDuration, warmupDurationMinutes]);
 
-  const calculateScore = useCallback((speedKmh) => {
-    if (speedKmh <= 0 || speedKmh < minScoringSpeed) return 0;
-    if (scoringMode === 'option_2') {
-      return Math.floor((speedKmh * (50 + speedKmh)) / 100);
-    }
-    return Math.floor((speedKmh * speedKmh) / 50);
-  }, [minScoringSpeed, scoringMode]);
+  const calculateScore = useMemo(() => createSpeedScoreCalculator(scoringMode, minScoringSpeed), [minScoringSpeed, scoringMode]);
 
   // Rest timer (90s after ball drop)
   useEffect(() => {
@@ -549,41 +557,41 @@ export default function SpeedMeter({ displayMode = 'full' }) {
     right: t('right'),
   }), [t]);
 
-  const buildMatchPayload = useCallback((status) => ({
-    game_status: status,
+  const buildMatchPayload = useCallback((status) => buildSpeedMeterMatchPayload({
+    status,
     visibility,
-    duo_name: duoName,
-    left_name: leftName,
-    right_name: rightName,
-    left_photo: leftPhoto,
-    right_photo: rightPhoto,
-    player_left_radar_enabled: leftRadarEnabled,
-    player_right_radar_enabled: rightRadarEnabled,
-    time_left: getRemainingClockSeconds(),
-    clock_started_at_ms: clockStartedAtRef.current,
-    clock_accumulated_ms: clockAccumulatedMsRef.current,
-    left_hits: leftHits,
-    right_hits: rightHits,
-    ball_drop_events: ballDropEvents,
-    total_score: totalScore,
-    left_raw_score: Math.round(leftRawScore),
-    right_raw_score: Math.round(rightRawScore),
-    left_effective_score: leftIndividualScore,
-    right_effective_score: rightIndividualScore,
-    ball_drops: ballDrops,
-    free_ball_drops: freeBallDrops,
-    distance_meters: distance,
-    match_duration_minutes: effectiveSettings.match_duration_minutes || 5,
-    warmup_duration_minutes: warmupDurationMinutes,
-    scoring_mode: scoringMode,
-    balance_enabled: balanceEnabled,
-    continuity_enabled: continuityEnabled,
-    power_enabled: powerEnabled,
-    min_scoring_speed: minScoringSpeed,
-    count_ball_drops: countBallDrops,
-    owner_user_id: user?.id,
-    owner_email: user?.email,
-    owner_name: `${user?.first_name || ''} ${user?.last_name || ''}`.trim(),
+    duoName,
+    leftName,
+    rightName,
+    leftPhoto,
+    rightPhoto,
+    leftRadarEnabled,
+    rightRadarEnabled,
+    timeLeft: getRemainingClockSeconds(),
+    clockStartedAtMs: clockStartedAtRef.current,
+    clockAccumulatedMs: clockAccumulatedMsRef.current,
+    leftHits,
+    rightHits,
+    ballDropEvents,
+    totalScore,
+    leftRawScore: Math.round(leftRawScore),
+    rightRawScore: Math.round(rightRawScore),
+    leftEffectiveScore: leftIndividualScore,
+    rightEffectiveScore: rightIndividualScore,
+    ballDrops,
+    freeBallDrops,
+    distanceMeters: distance,
+    matchDurationMinutes: effectiveSettings.match_duration_minutes || 5,
+    warmupDurationMinutes,
+    scoringMode,
+    balanceEnabled,
+    continuityEnabled,
+    powerEnabled,
+    minScoringSpeed,
+    countBallDrops,
+    ownerUserId: user?.id,
+    ownerEmail: user?.email,
+    ownerName: `${user?.first_name || ''} ${user?.last_name || ''}`.trim(),
   }), [
     visibility,
     duoName,
@@ -645,12 +653,22 @@ export default function SpeedMeter({ displayMode = 'full' }) {
   }, [isSpectator, buildMatchPayload, liveMatchId]);
 
   useEffect(() => {
-    if (isSpectator || isHydratingSession || !user?.id || (!gameStarted && !isWarmupRunning && !isWarmupCompleted && warmupStartedAtRef.current == null && warmupAccumulatedMsRef.current === 0)) return undefined;
+    if (!shouldScheduleSpeedMeterSessionSave({
+      isSpectator,
+      isHydratingSession,
+      userId: user?.id,
+      gameStarted,
+      isWarmupRunning,
+      isWarmupCompleted,
+      liveMatchId,
+      warmupStartedAtMs: warmupStartedAtRef.current,
+      warmupAccumulatedMs: warmupAccumulatedMsRef.current,
+    })) return undefined;
     if (sessionSaveTimerRef.current) {
       clearTimeout(sessionSaveTimerRef.current);
     }
     sessionSaveTimerRef.current = setTimeout(() => {
-      void saveLiveSession(isWarmupRunning ? 'warmup' : (matchEnded ? 'finished' : (isRunning ? 'live' : 'paused')));
+    void saveLiveSession(resolveSpeedMeterSessionStatus({ isWarmupRunning, matchEnded, isRunning }));
     }, 350);
 
     return () => {
@@ -685,7 +703,11 @@ export default function SpeedMeter({ displayMode = 'full' }) {
 
   // Main game timer
   useEffect(() => {
-    if (!gameStarted || isSpectator || matchEnded) return undefined;
+    if (!canResumeClock({
+      isSpectator,
+      gameStarted,
+      matchEnded,
+    })) return undefined;
 
     const syncClock = () => {
       if (clockStartedAtRef.current == null) {
@@ -734,7 +756,7 @@ export default function SpeedMeter({ displayMode = 'full' }) {
 
   const handleToggleTimer = useCallback(() => {
     if (isSpectator) return;
-    if (!isWarmupCompleted && (warmupStartedAtRef.current != null || warmupAccumulatedMsRef.current > 0)) return;
+    if (warmupControlsLocked) return;
 
     const now = Date.now();
     const hasStartedClock = clockAccumulatedMsRef.current > 0 || clockStartedAtRef.current != null;
@@ -804,7 +826,7 @@ export default function SpeedMeter({ displayMode = 'full' }) {
       return;
     }
 
-    if (warmupStartedAtRef.current == null && warmupAccumulatedMsRef.current === 0 && isWarmupCompleted) {
+    if (!warmupInProgress && isWarmupCompleted) {
       resetWarmupClock();
     }
 
@@ -812,7 +834,7 @@ export default function SpeedMeter({ displayMode = 'full' }) {
     setWarmupTimeLeft(getWarmupRemainingSeconds(now));
     setIsWarmupRunning(true);
     setIsWarmupCompleted(false);
-  }, [getWarmupRemainingSeconds, isSpectator, isWarmupCompleted, isWarmupRunning, pauseWarmupClock, resetWarmupClock, startWarmupClock, warmupDuration]);
+  }, [getWarmupRemainingSeconds, isSpectator, isWarmupCompleted, isWarmupRunning, pauseWarmupClock, resetWarmupClock, startWarmupClock, warmupDuration, warmupInProgress]);
 
   const handleWarmupFinish = useCallback(() => {
     if (isSpectator || warmupDuration <= 0) return;
@@ -830,13 +852,14 @@ export default function SpeedMeter({ displayMode = 'full' }) {
     const newDrops = ballDrops + 1;
     const now = Date.now();
     gameElapsed.current = Math.max(0, Math.floor(getElapsedClockMs(now) / 1000));
-    const dropEvent = {
-      drop_number: newDrops,
+    const dropEvent = createBallDropEvent({
+      dropNumber: newDrops,
       timestampMs: now,
-      elapsed_seconds: gameElapsed.current,
-      responsible_side: lastPressSide || null,
-      responsible_name: lastPressSide === 'left' ? leftName : lastPressSide === 'right' ? rightName : '',
-    };
+      elapsedSeconds: gameElapsed.current,
+      responsibleSide: lastPressSide,
+      leftName,
+      rightName,
+    });
     pauseClock();
     setBallDrops(newDrops);
     setBallDropEvents((prev) => [...prev, dropEvent]);
@@ -875,10 +898,14 @@ export default function SpeedMeter({ displayMode = 'full' }) {
   }
 
   const handlePass = useCallback((side) => {
-    if (isSpectator) return;
-    if (!gameStarted) return;
-    if (matchEnded) return; // no hits after match ends
-    if (!isWarmupCompleted && (warmupStartedAtRef.current != null || warmupAccumulatedMsRef.current > 0)) return;
+    if (!canInteractWithSpeedMeter({
+      isSpectator,
+      gameStarted,
+      matchEnded,
+      isWarmupCompleted,
+      warmupStartedAtMs: warmupStartedAtRef.current,
+      warmupAccumulatedMs: warmupAccumulatedMsRef.current,
+    })) return;
 
     const now = Date.now();
 
@@ -896,25 +923,27 @@ export default function SpeedMeter({ displayMode = 'full' }) {
     }
 
     gameElapsed.current = Math.max(0, Math.floor(getElapsedClockMs(now) / 1000));
+    const outcome = createPassOutcome({
+      side,
+      nowMs: now,
+      lastPressTime,
+      lastPressSide,
+      distanceMeters: distance,
+      elapsedSeconds: gameElapsed.current,
+    });
 
-    if (lastPressTime && lastPressSide && lastPressSide !== side) {
-      const timeDiffSeconds = (now - lastPressTime) / 1000;
-      const speedKmh = (distance / timeDiffSeconds) * 3.6;
-
-      playSpeedSound(speedKmh);
-
-      const hit = { speed: speedKmh, t: gameElapsed.current, timestampMs: now };
-
+    if (outcome.shouldPlaySpeedSound) {
+      playSpeedSound(outcome.speedKmh);
       if (side === 'left') {
-        setLeftHits((prev) => [...prev, hit]);
-        setLeftCurrentSpeed(speedKmh);
-        setLastLeftSpeed(speedKmh);
+        setLeftHits((prev) => [...prev, outcome.hit]);
+        setLeftCurrentSpeed(outcome.speedKmh);
+        setLastLeftSpeed(outcome.speedKmh);
       } else {
-        setRightHits((prev) => [...prev, hit]);
-        setRightCurrentSpeed(speedKmh);
-        setLastRightSpeed(speedKmh);
+        setRightHits((prev) => [...prev, outcome.hit]);
+        setRightCurrentSpeed(outcome.speedKmh);
+        setLastRightSpeed(outcome.speedKmh);
       }
-    } else {
+    } else if (outcome.shouldPlayClickSound) {
       playClickSound();
     }
 
@@ -982,7 +1011,11 @@ export default function SpeedMeter({ displayMode = 'full' }) {
   ]);
 
   useEffect(() => {
-    if (!gameStarted || isSpectator || !liveMatchId) return;
+    if (!shouldPersistSpeedMeterMatch({
+      isSpectator,
+      gameStarted,
+      liveMatchId,
+    })) return;
     void persistLiveMatch(matchEnded ? 'finished' : 'live');
   }, [
     gameStarted,
@@ -1011,8 +1044,8 @@ export default function SpeedMeter({ displayMode = 'full' }) {
             onToggle={handleToggleTimer}
             onReset={handleResetTimer}
             onWarmupToggle={handleWarmupToggle}
-            warmupActive={isWarmupRunning || isWarmupCompleted || warmupStartedAtRef.current != null || warmupAccumulatedMsRef.current > 0}
-            toggleDisabled={!isWarmupCompleted && (warmupStartedAtRef.current != null || warmupAccumulatedMsRef.current > 0)}
+            warmupActive={warmupControlsActive}
+            toggleDisabled={warmupControlsLocked}
             showControls={false}
           />
         </div>
@@ -1035,8 +1068,8 @@ export default function SpeedMeter({ displayMode = 'full' }) {
             onToggle={handleToggleTimer}
             onReset={handleResetTimer}
             onWarmupToggle={handleWarmupToggle}
-            warmupActive={isWarmupRunning || isWarmupCompleted || warmupStartedAtRef.current != null || warmupAccumulatedMsRef.current > 0}
-            toggleDisabled={!isWarmupCompleted && (warmupStartedAtRef.current != null || warmupAccumulatedMsRef.current > 0)}
+            warmupActive={warmupControlsActive}
+            toggleDisabled={warmupControlsLocked}
             showControls={!isEmbedded}
           />
         </div>
@@ -1051,6 +1084,7 @@ export default function SpeedMeter({ displayMode = 'full' }) {
               </Link>
               <Link
                 to={createPageUrl('Settings')}
+                state={{ returnTo: location.pathname }}
                 className="p-1.5 rounded-full bg-[#2a2a4a] hover:bg-[#3a3a5a] transition-colors"
               >
                 <SettingsIcon className="w-5 h-5 text-gray-300" />
@@ -1256,7 +1290,7 @@ export default function SpeedMeter({ displayMode = 'full' }) {
 
       {/* Pause + Ball drop + Undo drop â€” centered */}
       <div className="fixed left-1/2 bottom-[calc(1rem+env(safe-area-inset-bottom))] -translate-x-1/2 flex gap-3 z-50">
-        <PauseButton isRunning={isRunning} onToggle={handleToggleTimer} disabled={!isWarmupCompleted && (warmupStartedAtRef.current != null || warmupAccumulatedMsRef.current > 0)} />
+        <PauseButton isRunning={isRunning} onToggle={handleToggleTimer} disabled={warmupControlsLocked} />
         <BallDropButton
           count={ballDrops}
           onPress={handleBallDrop}
@@ -1294,24 +1328,6 @@ export default function SpeedMeter({ displayMode = 'full' }) {
       )}
     </div>
   );
-}
-
-function applyBalanceRule(leftScore, rightScore, enabled) {
-  if (!enabled) {
-    return { left: leftScore, right: rightScore };
-  }
-
-  if (leftScore >= rightScore) {
-    return {
-      left: Math.min(leftScore, rightScore * 1.3),
-      right: rightScore,
-    };
-  }
-
-  return {
-    left: leftScore,
-    right: Math.min(rightScore, leftScore * 1.3),
-  };
 }
 
 

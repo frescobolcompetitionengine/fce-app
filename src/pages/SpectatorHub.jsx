@@ -4,54 +4,13 @@ import { Navigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import MatchReport from '@/components/MatchReport';
 import { useAuth } from '@/lib/AuthContext';
+import { formatMatchDateTime, getMatchStatus, getMatchTitle, getMatchVisibility } from '@/lib/matchPresentation';
 import { useI18n } from '@/lib/i18n';
-import { getScoringModeDefaults } from '@/lib/scoring';
+import { createSpeedScoreCalculator, resolveScoringConfiguration } from '@/lib/scoring';
 import { listMatchHistory } from '@/services/matchHistoryRepository';
 import { listGameSessions } from '@/services/gameSessionRepository';
-
-function formatDateTime(iso, language) {
-  if (!iso) return { date: '-', time: '-' };
-  const d = new Date(iso);
-  return {
-    date: d.toLocaleDateString(language),
-    time: d.toLocaleTimeString(language, { hour: '2-digit', minute: '2-digit' }),
-  };
-}
-
-function makeCalculateScore(match) {
-  const scoringMode = match?.scoring_mode || 'option_1';
-  const minScoringSpeed = match?.min_scoring_speed ?? 50;
-  return (speedKmh) => {
-    if (speedKmh <= 0 || speedKmh < minScoringSpeed) return 0;
-    if (scoringMode === 'option_2') return Math.floor((speedKmh * (50 + speedKmh)) / 100);
-    return Math.floor((speedKmh * speedKmh) / 50);
-  };
-}
-
-function getMatchTitle(match) {
-  return match?.duo_name || `${match?.left_name || '-'} & ${match?.right_name || '-'}`;
-}
-
-function getVisibility(match) {
-  return match?.visibility === 'public' ? 'public' : 'private';
-}
-
-function getStatus(match) {
-  if (match?.game_status === 'warmup') return 'warmup';
-  if (match?.game_status === 'live') return 'live';
-  if (match?.game_status === 'paused' && (match?.game_started || match?.is_running)) return 'live';
-  if (match?.game_status === 'paused' && (match?.is_warming_up || match?.warmup_started_at_ms || Number(match?.warmup_accumulated_ms || 0) > 0) && !match?.warmup_completed) return 'warmup';
-  return 'finished';
-}
-
-function statusBadgeClass(status) {
-  if (status === 'warmup') {
-    return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
-  }
-  return status === 'live'
-    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-    : 'bg-slate-500/15 text-slate-300 border-slate-500/30';
-}
+import { createPageUrl } from '@/utils';
+import { buildSpectatorMatches, statusBadgeClass } from '@/lib/spectatorHubView';
 
 export default function SpectatorHub() {
   const { t, language } = useI18n();
@@ -71,25 +30,17 @@ export default function SpectatorHub() {
   });
 
   if (!isSpectator) {
-    return <Navigate to="/GameSetup" replace />;
+    return <Navigate to={createPageUrl('SpeedMeter')} replace />;
   }
 
   if (isLoadingLive || isLoadingHistory) {
     return <div className="min-h-[100dvh] bg-gradient-to-b from-[#1a1a2e] to-[#0d0d1a] flex items-center justify-center"><div className="animate-spin w-8 h-8 border-4 border-[#0f9b8e] border-t-transparent rounded-full" /></div>;
   }
 
-  const liveMatches = liveSessions
-    .filter((match) => getVisibility(match) === 'public' && (getStatus(match) === 'warmup' || getStatus(match) === 'live' || (match?.game_status === 'paused' && !match?.warmup_completed && (match?.game_started || match?.is_running || match?.is_warming_up || match?.warmup_started_at_ms || Number(match?.warmup_accumulated_ms || 0) > 0))))
-    .map((match) => ({ ...match, game_status: getStatus(match), source: 'session' }));
-
-  const finishedMatches = historyMatches
-    .filter((match) => getVisibility(match) === 'public')
-    .map((match) => ({ ...match, game_status: getStatus(match), source: 'history' }));
-
-  const publicMatches = [...liveMatches, ...finishedMatches];
+  const { liveMatches, finishedMatches, publicMatches } = buildSpectatorMatches(liveSessions, historyMatches);
   const selected = publicMatches.find((match) => match.id === selectedId) || null;
-  const dt = selected ? formatDateTime(selected.played_at || selected.started_at || selected.created_at, language) : null;
-  const selectedScoringModeDefaults = selected ? getScoringModeDefaults(selected.scoring_mode || 'option_1') : getScoringModeDefaults('option_1');
+  const dt = selected ? formatMatchDateTime(selected.played_at || selected.started_at || selected.created_at, language) : null;
+  const selectedScoringConfig = resolveScoringConfiguration(selected?.scoring_mode || 'option_1', selected?.min_scoring_speed ?? 50);
 
   return (
     <div className="min-h-[100dvh] bg-gradient-to-b from-[#1a1a2e] to-[#0d0d1a] text-white pb-[calc(5.5rem+env(safe-area-inset-bottom))]">
@@ -142,7 +93,7 @@ export default function SpectatorHub() {
                 </div>
               ) : (
                 liveMatches.map((match) => {
-                  const { date, time } = formatDateTime(match.played_at || match.started_at || match.created_at, language);
+                  const { date, time } = formatMatchDateTime(match.played_at || match.started_at || match.created_at, language);
                   return (
                     <button
                       key={match.id}
@@ -151,7 +102,7 @@ export default function SpectatorHub() {
                     >
                       <div className="min-w-0">
                         <div className="mb-2 flex flex-wrap gap-2">
-                          <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${statusBadgeClass(getStatus(match))}`}>{getStatus(match) === 'warmup' ? t('warmupStatus') : t('liveStatus')}</span>
+                          <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${statusBadgeClass(getMatchStatus(match))}`}>{getMatchStatus(match) === 'warmup' ? t('warmupStatus') : t('liveStatus')}</span>
                           <span className="rounded-full border border-[#2a2a4a] bg-[#0d0d1a] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-300">{t('publicGame')}</span>
                         </div>
                         <p className="truncate text-base font-bold text-white">{getMatchTitle(match)}</p>
@@ -178,7 +129,7 @@ export default function SpectatorHub() {
             </div>
           ) : (
               finishedMatches.map((match) => {
-                const { date, time } = formatDateTime(match.played_at || match.started_at || match.created_at, language);
+                const { date, time } = formatMatchDateTime(match.played_at || match.started_at || match.created_at, language);
                 return (
                   <button
                     key={match.id}
@@ -217,12 +168,12 @@ export default function SpectatorHub() {
           totalScore={selected.total_score || 0}
           ballDrops={selected.ball_drops || 0}
           freeBallDrops={selected.free_ball_drops ?? 5}
-          calculateScore={makeCalculateScore(selected)}
-          continuityEnabled={selected.continuity_enabled ?? selectedScoringModeDefaults.continuity_enabled}
-          powerEnabled={selected.power_enabled ?? selectedScoringModeDefaults.power_enabled}
-          matchStatus={getStatus(selected)}
-          visibility={getVisibility(selected)}
-          duoName={getMatchTitle(selected)}
+          calculateScore={createSpeedScoreCalculator(selected?.scoring_mode || 'option_1', selected?.min_scoring_speed ?? 50)}
+          continuityEnabled={selected.continuity_enabled ?? selectedScoringConfig.continuityEnabled}
+          powerEnabled={selected.power_enabled ?? selectedScoringConfig.powerEnabled}
+          matchStatus={getMatchStatus(selected)}
+          visibility={getMatchVisibility(selected)}
+          duoName={getMatchTitle(selected, ' & ')}
           onClose={() => setSelectedId(null)}
         />
       )}

@@ -1,14 +1,11 @@
 const memoryStorage = new Map();
 
 function getStorage() {
-  if (typeof window === 'undefined') {
-    return {
-      getItem: (key) => memoryStorage.get(key) ?? null,
-      setItem: (key, value) => memoryStorage.set(key, value),
-      removeItem: (key) => memoryStorage.delete(key),
-    };
-  }
-  return window.sessionStorage;
+  return {
+    getItem: (key) => memoryStorage.get(key) ?? null,
+    setItem: (key, value) => memoryStorage.set(key, value),
+    removeItem: (key) => memoryStorage.delete(key),
+  };
 }
 
 export function generateId() {
@@ -25,15 +22,6 @@ export function readJson(key, fallback) {
     const raw = storage.getItem(key);
     if (raw) return JSON.parse(raw);
 
-    if (typeof window !== 'undefined') {
-      const legacyRaw = window.localStorage.getItem(key);
-      if (legacyRaw) {
-        storage.setItem(key, legacyRaw);
-        window.localStorage.removeItem(key);
-        return JSON.parse(legacyRaw);
-      }
-    }
-
     return clone(fallback);
   } catch {
     return clone(fallback);
@@ -47,9 +35,6 @@ export function writeJson(key, value) {
 export function removeItem(key) {
   const storage = getStorage();
   storage.removeItem(key);
-  if (typeof window !== 'undefined') {
-    window.localStorage.removeItem(key);
-  }
 }
 
 export function sortItems(items, order = '-created_at') {

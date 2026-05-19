@@ -110,7 +110,7 @@ export default function AdminSystem() {
   }
 
   if (!isAdmin) {
-    return <Navigate to={createPageUrl('GameSetup')} replace />;
+    return <Navigate to={createPageUrl('SpeedMeter')} replace />;
   }
 
   const visibleUsers = isAdmin ? users : users.filter((u) => u.id === user?.id);

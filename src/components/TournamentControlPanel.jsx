@@ -1,6 +1,6 @@
 import React from 'react';
 import { ExternalLink, Flame, Play, RotateCcw, Undo2, ChevronLeft, ChevronRight, Settings as SettingsIcon, House } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { useI18n } from '@/lib/i18n';
 import { emitTournamentControl } from '@/lib/tournamentControlBus';
@@ -27,6 +27,7 @@ function ControlButton({ label, icon: Icon = null, onClick, tone = 'neutral' }) 
 
 export default function TournamentControlPanel() {
   const { t } = useI18n();
+  const location = useLocation();
 
   const send = (command, payload = {}) => emitTournamentControl(command, payload);
 
@@ -40,7 +41,7 @@ export default function TournamentControlPanel() {
         <div className="flex items-center gap-2">
           <Link
             to={createPageUrl('Settings')}
-            state={{ returnTo: createPageUrl('TournamentRoom') }}
+            state={{ returnTo: location.pathname }}
             className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 transition-colors hover:bg-white/10"
             title={t('settings')}
             aria-label={t('settings')}

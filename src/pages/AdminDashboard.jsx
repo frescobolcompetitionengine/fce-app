@@ -1,6 +1,6 @@
 import React from 'react';
-import { Link, Navigate } from 'react-router-dom';
-import { Settings, Gauge, History, ShieldCheck, LogOut, Play } from 'lucide-react';
+import { Link, Navigate, useLocation } from 'react-router-dom';
+import { Settings, Gauge, History, ShieldCheck, LogOut } from 'lucide-react';
 import { createPageUrl } from '@/utils';
 import { useAuth } from '@/lib/AuthContext';
 import { useI18n } from '@/lib/i18n';
@@ -9,11 +9,11 @@ import PageShell from '@/components/PageShell';
 export default function AdminDashboard() {
   const { user, isAdmin, isSpectator, logout } = useAuth();
   const { t } = useI18n();
+  const location = useLocation();
   if (isSpectator) return <Navigate to={createPageUrl('SpectatorHub')} replace />;
-  if (!isAdmin) return <Navigate to={createPageUrl('GameSetup')} replace />;
+  if (!isAdmin) return <Navigate to={createPageUrl('SpeedMeter')} replace />;
 
   const actions = [
-    { key: 'create', label: t('createGame'), icon: Play, to: 'GameSetup' },
     { key: 'settings', label: t('settings'), icon: Settings, to: 'Settings' },
     { key: 'meter', label: t('measurement'), icon: Gauge, to: 'SpeedMeter' },
     { key: 'history', label: t('reports'), icon: History, to: 'MatchHistory' },
@@ -39,8 +39,9 @@ export default function AdminDashboard() {
         <div className="grid grid-cols-2 gap-4">
           {actions.map((action) => {
             const Icon = action.icon;
+            const state = action.to === 'Settings' ? { returnTo: location.pathname } : undefined;
             return (
-              <Link key={action.key} to={createPageUrl(action.to)} className="bg-[#16213e] border border-[#2a2a4a] rounded-2xl p-4 hover:bg-[#1d274b] transition-colors">
+              <Link key={action.key} to={createPageUrl(action.to)} state={state} className="bg-[#16213e] border border-[#2a2a4a] rounded-2xl p-4 hover:bg-[#1d274b] transition-colors">
                 <Icon className="w-7 h-7 text-[#0f9b8e] mb-3" />
                 <p className="font-semibold">{action.label}</p>
               </Link>

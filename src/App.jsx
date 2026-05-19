@@ -4,7 +4,6 @@ import PageNotFound from '@/lib/PageNotFound';
 import { useAuth } from '@/lib/AuthContext';
 import { createPageUrl } from '@/utils';
 import SpeedMeter from '@/pages/SpeedMeter';
-import GameSetup from '@/pages/GameSetup';
 import Settings from '@/pages/Settings';
 import MatchHistory from '@/pages/MatchHistory';
 import SpectatorHub from '@/pages/SpectatorHub';
@@ -41,9 +40,9 @@ export default function App() {
         </div>
       )}
       <Routes>
-        <Route path="/" element={<Navigate to={isAuthenticated ? (isSpectator ? createPageUrl('SpectatorHub') : isAdmin ? createPageUrl('AdminDashboard') : isTournament ? createPageUrl('TournamentRoom') : createPageUrl('GameSetup')) : createPageUrl('Login')} replace />} />
+        <Route path="/" element={<Navigate to={isAuthenticated ? (isSpectator ? createPageUrl('SpectatorHub') : isAdmin ? createPageUrl('AdminDashboard') : isTournament ? createPageUrl('TournamentRoom') : createPageUrl('SpeedMeter')) : createPageUrl('Login')} replace />} />
         <Route path={createPageUrl('Login')} element={<Login />} />
-        <Route path={createPageUrl('GameSetup')} element={<PrivateRoute><GameSetup /></PrivateRoute>} />
+        <Route path={createPageUrl('GameSetup')} element={<Navigate to={createPageUrl('SpeedMeter')} replace />} />
         <Route path={createPageUrl('SpeedMeter')} element={<PrivateRoute><SpeedMeter /></PrivateRoute>} />
         <Route path={createPageUrl('TournamentRoom')} element={<PrivateRoute><TournamentRoom /></PrivateRoute>} />
         <Route path={createPageUrl('TournamentView')} element={<PrivateRoute><TournamentView /></PrivateRoute>} />

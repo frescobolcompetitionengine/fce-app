@@ -12,6 +12,46 @@ export function getScoringModeDefaults(scoringMode = 'option_1') {
   };
 }
 
+export function resolveScoringConfiguration(scoringMode = 'option_1', minScoringSpeed = 50, overrides = {}) {
+  const mode = scoringMode === 'option_2' ? 'option_2' : 'option_1';
+  const defaults = getScoringModeDefaults(mode);
+  return {
+    scoringMode: mode,
+    minScoringSpeed: Number.isFinite(minScoringSpeed) ? minScoringSpeed : 50,
+    balanceEnabled: overrides.balanceEnabled ?? defaults.balance_enabled,
+    continuityEnabled: overrides.continuityEnabled ?? defaults.continuity_enabled,
+    powerEnabled: overrides.powerEnabled ?? defaults.power_enabled,
+  };
+}
+
+export function createSpeedScoreCalculator(scoringMode = 'option_1', minScoringSpeed = 50) {
+  const mode = scoringMode === 'option_2' ? 'option_2' : 'option_1';
+  const threshold = Number.isFinite(minScoringSpeed) ? minScoringSpeed : 50;
+  return (speedKmh = 0) => {
+    if (speedKmh <= 0 || speedKmh < threshold) return 0;
+    if (mode === 'option_2') return calculateFrescobolRule2Score(speedKmh);
+    return calculateFrescobolRule1Score(speedKmh);
+  };
+}
+
+export function applyBalanceRule(leftScore, rightScore, enabled) {
+  if (!enabled) {
+    return { left: leftScore, right: rightScore };
+  }
+
+  if (leftScore >= rightScore) {
+    return {
+      left: Math.min(leftScore, rightScore * 1.3),
+      right: rightScore,
+    };
+  }
+
+  return {
+    left: leftScore,
+    right: Math.min(rightScore, leftScore * 1.3),
+  };
+}
+
 export function calculateFrescobolRule1Score(speedKmh = 0) {
   if (!Number.isFinite(speedKmh) || speedKmh < 50) return 0;
   return Math.floor((speedKmh * speedKmh) / 50);

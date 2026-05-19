@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/AuthContext';
 
-const LANGUAGE_KEY = 'frescobol_language';
 const DEFAULT_LANGUAGE = 'pt-BR';
-const LEGACY_LANGUAGE_KEY = 'frescobol_language';
 
 const messages = {
   'pt-BR': {
@@ -841,21 +839,11 @@ function ensureTrailingPeriod(text, key) {
 }
 
 function readStoredLanguage() {
-  if (typeof window === 'undefined') return null;
-  const sessionLanguage = window.sessionStorage.getItem(LANGUAGE_KEY);
-  if (sessionLanguage) return sessionLanguage;
-
-  const legacyLanguage = window.localStorage.getItem(LEGACY_LANGUAGE_KEY);
-  if (legacyLanguage) {
-    window.sessionStorage.setItem(LANGUAGE_KEY, legacyLanguage);
-    window.localStorage.removeItem(LEGACY_LANGUAGE_KEY);
-  }
-  return legacyLanguage || null;
+  return null;
 }
 
 function persistStoredLanguage(language) {
-  if (typeof window === 'undefined') return;
-  window.sessionStorage.setItem(LANGUAGE_KEY, language);
+  return language;
 }
 
 export function getAppLanguage(preferredLanguage = null) {

@@ -1,17 +1,8 @@
 import { apiRequest } from './apiClient';
 
-const LEGACY_ANALYSIS_REPORTS_KEY = 'frescobol_analysis_reports_v1';
 const COLLECTION = 'analysis_reports';
 const LOCAL_DB_NAME = 'frescobol_analysis_reports_db_v1';
 const LOCAL_STORE_NAME = 'analysis_reports';
-
-if (typeof window !== 'undefined') {
-  try {
-    window.localStorage.removeItem(LEGACY_ANALYSIS_REPORTS_KEY);
-  } catch {
-    // Ignore browser storage cleanup failures; server storage is the source of truth.
-  }
-}
 
 function isNetworkLikeError(error) {
   const message = String(error?.message || error || '').toLowerCase();

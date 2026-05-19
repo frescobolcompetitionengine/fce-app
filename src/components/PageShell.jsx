@@ -7,7 +7,6 @@ import { useI18n } from '@/lib/i18n';
 
 function getNavItems(t, isAdmin, isTournament) {
   const items = [
-    { to: 'GameSetup', label: t('createShort'), icon: Play },
     { to: 'SpeedMeter', label: t('measurement'), icon: Gauge },
     { to: 'MatchHistory', label: t('reports'), icon: History },
     { to: 'Settings', label: t('settings'), icon: Settings },
@@ -56,11 +55,13 @@ export default function PageShell({
               const Icon = item.icon;
               const to = createPageUrl(item.to);
               const isActive = activePath === to;
+              const state = item.to === 'Settings' ? { returnTo: activePath } : undefined;
 
               return (
                 <Link
                   key={item.to}
                   to={to}
+                  state={state}
                   className={`flex flex-col items-center gap-1 rounded-2xl px-2 py-3 text-[11px] font-semibold transition-colors ${
                     isActive
                       ? 'bg-[#0f9b8e]/20 text-[#6ee7df]'
@@ -119,11 +120,13 @@ export default function PageShell({
               const Icon = item.icon;
               const to = createPageUrl(item.to);
               const isActive = activePath === to;
+              const state = item.to === 'Settings' ? { returnTo: activePath } : undefined;
 
               return (
                 <Link
                   key={item.to}
                   to={to}
+                  state={state}
                   className={`flex min-w-0 flex-col items-center justify-center rounded-2xl px-2 py-2 text-[11px] font-semibold transition-colors ${
                     isActive
                       ? 'bg-[#0f9b8e]/20 text-[#6ee7df]'

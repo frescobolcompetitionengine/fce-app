@@ -61,3 +61,6 @@ Este repositório está em migração para uma camada de dados própria. As cont
 - `npm run prod` gera o build do frontend e arranca o backend para servir a app compilada no mesmo processo.
 - O template do serviço `systemd` para Raspberry está em `deploy/raspberry/fce-app.service`.
 - As instruções de instalação para a Raspberry estão em `deploy/raspberry/README.md`.
+- O mapa de arquitetura e finalização está em `docs/architecture-map.md`.
+- O fluxo oficial de trabalho está em `docs/official-flow.md`.
+- O plano de estabilização final está em `docs/stabilization-plan.md`.
