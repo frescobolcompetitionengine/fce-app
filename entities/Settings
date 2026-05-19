@@ -1,0 +1,135 @@
+{
+  "name": "Settings",
+  "type": "object",
+  "properties": {
+    "distance_meters": {
+      "type": "number",
+      "default": 10,
+      "description": "Distance between the two reference points in meters"
+    },
+    "match_duration_minutes": {
+      "type": "number",
+      "default": 5,
+      "description": "Duration of each match in minutes"
+    },
+    "player_left_name": {
+      "type": "string",
+      "default": "Player 1",
+      "description": "Name of the left player"
+    },
+    "player_right_name": {
+      "type": "string",
+      "default": "Player 2",
+      "description": "Name of the right player"
+    },
+    "player_left_photo": {
+      "type": "string",
+      "description": "Photo URL of the left player"
+    },
+    "player_right_photo": {
+      "type": "string",
+      "description": "Photo URL of the right player"
+    },
+    "free_ball_drops": {
+      "type": "number",
+      "default": 5,
+      "description": "Number of ball drops allowed before penalty applies (3% per extra drop)"
+    },
+    "max_ball_drops": {
+      "type": "number",
+      "default": 20,
+      "description": "Number of ball drops that ends the match immediately"
+    },
+    "count_ball_drops": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether ball drops are counted to end the match"
+    },
+    "score_50kmh": {
+      "type": "number",
+      "default": 10
+    },
+    "score_55kmh": {
+      "type": "number",
+      "default": 15
+    },
+    "score_60kmh": {
+      "type": "number",
+      "default": 20
+    },
+    "score_65kmh": {
+      "type": "number",
+      "default": 27
+    },
+    "score_70kmh": {
+      "type": "number",
+      "default": 35
+    },
+    "score_75kmh": {
+      "type": "number",
+      "default": 42
+    },
+    "score_80kmh": {
+      "type": "number",
+      "default": 50
+    },
+    "score_85kmh": {
+      "type": "number",
+      "default": 60
+    },
+    "score_90kmh": {
+      "type": "number",
+      "default": 70
+    },
+    "score_95kmh": {
+      "type": "number",
+      "default": 85
+    },
+    "score_100kmh": {
+      "type": "number",
+      "default": 100
+    }
+  },
+  "required": [],
+  "rls": {
+    "create": {
+      "created_by": "{{user.email}}"
+    },
+    "read": {
+      "$or": [
+        {
+          "created_by": "{{user.email}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by": "{{user.email}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by": "{{user.email}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

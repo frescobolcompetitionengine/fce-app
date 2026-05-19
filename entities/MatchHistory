@@ -1,0 +1,55 @@
+{
+  "name": "MatchHistory",
+  "type": "object",
+  "properties": {
+    "played_at": {
+      "type": "string",
+      "description": "ISO datetime when the match was played"
+    },
+    "left_name": {
+      "type": "string"
+    },
+    "right_name": {
+      "type": "string"
+    },
+    "left_photo": {
+      "type": "string"
+    },
+    "right_photo": {
+      "type": "string"
+    },
+    "left_hits": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "Array of {speed, t} hit records for left player"
+    },
+    "right_hits": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "Array of {speed, t} hit records for right player"
+    },
+    "total_score": {
+      "type": "number"
+    },
+    "ball_drops": {
+      "type": "number"
+    },
+    "free_ball_drops": {
+      "type": "number"
+    },
+    "distance_meters": {
+      "type": "number"
+    },
+    "match_duration_minutes": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "left_name",
+    "right_name"
+  ]
+}

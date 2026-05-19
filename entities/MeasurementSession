@@ -1,0 +1,56 @@
+{
+  "name": "MeasurementSession",
+  "type": "object",
+  "properties": {
+    "participant_left": {
+      "type": "string",
+      "description": "Name of left participant"
+    },
+    "participant_right": {
+      "type": "string",
+      "description": "Name of right participant"
+    },
+    "distance_meters": {
+      "type": "number",
+      "description": "Distance between the two points in meters"
+    },
+    "left_speeds": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "description": "Array of speeds recorded for left side"
+    },
+    "right_speeds": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "description": "Array of speeds recorded for right side"
+    },
+    "left_max_speed": {
+      "type": "number",
+      "description": "Maximum speed recorded for left side"
+    },
+    "right_max_speed": {
+      "type": "number",
+      "description": "Maximum speed recorded for right side"
+    },
+    "total_score": {
+      "type": "number",
+      "description": "Total accumulated score"
+    },
+    "interruptions": {
+      "type": "number",
+      "description": "Number of interruptions"
+    },
+    "session_duration": {
+      "type": "number",
+      "description": "Duration of session in seconds"
+    }
+  },
+  "required": [
+    "participant_left",
+    "participant_right"
+  ]
+}

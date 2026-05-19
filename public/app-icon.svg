@@ -1,0 +1,7 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="112" fill="#0D0D1A"/>
+  <circle cx="256" cy="180" r="92" fill="#0F9B8E"/>
+  <path d="M152 352C152 290.754 201.754 241 263 241H353V352C353 372.435 336.435 389 316 389H189C168.565 389 152 372.435 152 352Z" fill="#16213E"/>
+  <path d="M203 174L241 222L309 122" stroke="white" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="256" y="345" text-anchor="middle" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="92" font-weight="700">FR</text>
+</svg>
