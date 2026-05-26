@@ -1,4 +1,4 @@
-**Frescobol Ramiro**
+**FCE**
 
 Aplicativo web/mobile para controle de partidas, histórico e administração.
 

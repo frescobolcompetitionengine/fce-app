@@ -10,9 +10,13 @@ const backendHealthUrl = 'http://127.0.0.1:8787/api/health';
 const openBrowserEnabled = String(process.env.FCE_OPEN_BROWSER || 'true').toLowerCase() !== 'false';
 
 function spawnService(label, args) {
-  const child = spawn(npmCommand, args, {
+  const command = isWindows ? 'cmd.exe' : npmCommand;
+  const commandArgs = isWindows ? ['/c', npmCommand, ...args] : args;
+
+  const child = spawn(command, commandArgs, {
     stdio: 'inherit',
     shell: false,
+    windowsHide: true,
     env: {
       ...process.env,
       FORCE_COLOR: process.env.FORCE_COLOR || '1',
@@ -48,10 +52,11 @@ async function waitForHttpOk(url, timeoutMs = 30000, intervalMs = 500) {
 
 function openBrowser(url) {
   if (!isWindows) return;
-  const child = spawn('cmd', ['/c', 'start', '', url], {
+  const child = spawn('cmd.exe', ['/c', 'start', '', url], {
     stdio: 'ignore',
     detached: true,
     shell: false,
+    windowsHide: true,
   });
   child.unref();
 }

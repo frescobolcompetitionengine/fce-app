@@ -7,8 +7,3 @@ export function filterMatchHistoryByOwner(allMatches, { isAdmin, selectedOwner, 
   });
 }
 
-export function findDemoMatch(matches, userId, demoKeyPrefix = 'fce-bonus-demo-v1-') {
-  return (matches || []).find(
-    (match) => match?.owner_user_id === userId && String(match?.demo_key || '').startsWith(demoKeyPrefix),
-  ) || null;
-}

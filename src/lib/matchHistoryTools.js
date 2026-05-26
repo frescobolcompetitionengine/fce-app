@@ -1,5 +1,5 @@
 import jsPDF from 'jspdf';
-import { buildAthleteScoreBreakdown, createSpeedScoreCalculator } from '@/lib/scoring';
+import { createSpeedScoreCalculator } from '@/lib/scoring';
 import { formatMatchDateTime } from '@/lib/matchPresentation';
 
 export function getMatchScoreCalculator(match) {
@@ -14,70 +14,6 @@ export function fmtSeconds(t) {
   const mins = Math.floor(t / 60);
   const secs = t % 60;
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-}
-
-export function buildDemoHits(startMs, speeds, spacingMs = 160) {
-  return speeds.map((speed, index) => {
-    const timestampMs = startMs + index * spacingMs;
-    return {
-      speed,
-      timestampMs,
-      elapsedMs: timestampMs - startMs,
-      t: Number(((timestampMs - startMs) / 1000).toFixed(3)),
-    };
-  });
-}
-
-export function buildDemoMatch(user, t) {
-  const now = Date.now();
-  const leftSpeeds = [52, 58, 67, 80, 96, 115, 138, 165, 198, 238, 120, 150];
-  const rightSpeeds = [54, 60, 72, 86, 103, 124, 149, 178, 212, 251, 130, 158];
-  const leftHits = [
-    ...buildDemoHits(now, leftSpeeds.slice(0, 10), 150),
-    ...buildDemoHits(now + 3200, leftSpeeds.slice(10), 180),
-  ];
-  const rightHits = [
-    ...buildDemoHits(now + 800, rightSpeeds.slice(0, 10), 150),
-    ...buildDemoHits(now + 4100, rightSpeeds.slice(10), 180),
-  ];
-  const calculateScore = createSpeedScoreCalculator('option_2', 50);
-  const leftBreakdown = buildAthleteScoreBreakdown(leftHits, calculateScore, { continuityEnabled: true, powerEnabled: true });
-  const rightBreakdown = buildAthleteScoreBreakdown(rightHits, calculateScore, { continuityEnabled: true, powerEnabled: true });
-  const ballDropEvents = [
-    { drop_number: 1, elapsed_seconds: 19, responsible_side: 'left', responsible_name: t('leftPlayer') },
-    { drop_number: 2, elapsed_seconds: 74, responsible_side: 'right', responsible_name: t('rightPlayer') },
-  ];
-
-  return {
-    demo_key: `fce-bonus-demo-v1-${user?.id || 'guest'}`,
-    is_demo: true,
-    played_at: new Date().toISOString(),
-    started_at: new Date(now - 90_000).toISOString(),
-    game_status: 'finished',
-    match_ended: true,
-    visibility: 'private',
-    duo_name: 'Demo de BÃ´nus',
-    left_name: t('leftPlayer'),
-    right_name: t('rightPlayer'),
-    left_photo: '',
-    right_photo: '',
-    left_hits: leftHits,
-    right_hits: rightHits,
-    ball_drops: ballDropEvents.length,
-    ball_drop_events: ballDropEvents,
-    free_ball_drops: 5,
-    total_score: leftBreakdown.total + rightBreakdown.total,
-    scoring_mode: 'option_2',
-    min_scoring_speed: 50,
-    balance_enabled: true,
-    continuity_enabled: true,
-    power_enabled: true,
-    distance_meters: 10,
-    match_duration_minutes: 5,
-    warmup_duration_minutes: 5,
-    owner_user_id: user?.id,
-    owner_email: user?.email,
-  };
 }
 
 export function exportMatchCSV(match, t) {

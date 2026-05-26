@@ -22,6 +22,7 @@ import {
   selectPreferredSettingsProfile,
   setActiveSettingsProfile,
   updateSettings,
+  SETTINGS_FIXED_PROFILE_NAME,
   SETTINGS_PROFILE_DEFAULTS,
 } from '@/services/settingsRepository';
 
@@ -37,6 +38,18 @@ const defaultFormData = {
 
 const GENERIC_PLAYER_NAME_PATTERN = /^(?:Player|Jogador|プレイヤー)\s*[12]$/u;
 const NEW_PROFILE_ID = '__new_profile__';
+const FIXED_PROFILE_LOCKED_FIELDS = new Set([
+  'match_duration_minutes',
+  'warmup_duration_minutes',
+  'scoring_mode',
+  'min_scoring_speed',
+  'free_ball_drops',
+  'max_ball_drops',
+  'count_ball_drops',
+  'balance_enabled',
+  'continuity_enabled',
+  'power_enabled',
+]);
 
 const normalizeDisplayedValue = (value) => {
   const normalized = String(value ?? '').trim();
@@ -53,7 +66,7 @@ export default function Settings() {
   const queryClient = useQueryClient();
   const [profiles, setProfiles] = useState([]);
   const [selectedProfileId, setSelectedProfileId] = useState(null);
-  const [profileName, setProfileName] = useState('default');
+  const [profileName, setProfileName] = useState(SETTINGS_FIXED_PROFILE_NAME);
   const [newProfileName, setNewProfileName] = useState('');
   const [formData, setFormData] = useState(defaultFormData);
   const fallbackReturnTo = isTournament ? createPageUrl('TournamentRoom') : createPageUrl('SpeedMeter');
@@ -81,7 +94,11 @@ export default function Settings() {
     return selectPreferredSettingsProfile(profileOptions);
   }, [isDraftProfile, profileOptions, selectedProfileId]);
 
-  const isDefaultProfileLocked = Boolean(selectedProfile?.is_default_profile && !isDraftProfile);
+  const isFixedProfile = Boolean(selectedProfile?.is_default_profile && !isDraftProfile);
+  const isFixedProfileNameLocked = isFixedProfile;
+  const isFixedProfileFieldLocked = (field) => Boolean(isFixedProfile && FIXED_PROFILE_LOCKED_FIELDS.has(field));
+  const displayedScoringMode = isFixedProfile ? 'option_1' : formData.scoring_mode;
+  const isOption1Selected = displayedScoringMode === 'option_1';
 
   const mapProfileToForm = (settings) => ({
     ...defaultFormData,
@@ -90,8 +107,8 @@ export default function Settings() {
     distance_meters: settings.distance_meters ?? SETTINGS_PROFILE_DEFAULTS.distance_meters,
     match_duration_minutes: settings.match_duration_minutes ?? SETTINGS_PROFILE_DEFAULTS.match_duration_minutes,
     warmup_duration_minutes: settings.warmup_duration_minutes ?? settings.match_duration_minutes ?? SETTINGS_PROFILE_DEFAULTS.warmup_duration_minutes,
-    player_left_name: normalizeDisplayedValue(settings.player_left_name),
-    player_right_name: normalizeDisplayedValue(settings.player_right_name),
+    player_left_name: settings.player_left_name || SETTINGS_PROFILE_DEFAULTS.player_left_name,
+    player_right_name: settings.player_right_name || SETTINGS_PROFILE_DEFAULTS.player_right_name,
     player_left_photo: settings.player_left_photo || '',
     player_right_photo: settings.player_right_photo || '',
     player_left_radar_enabled: settings.player_left_radar_enabled ?? false,
@@ -124,7 +141,7 @@ export default function Settings() {
   useEffect(() => {
     if (!selectedProfile) return;
     setSelectedProfileId(selectedProfile.id);
-    setProfileName(selectedProfile.profile_name || 'default');
+    setProfileName(selectedProfile.profile_name || SETTINGS_FIXED_PROFILE_NAME);
     setNewProfileName('');
     setAppLanguage(selectedProfile.language || 'pt-BR');
     const scoringConfig = resolveScoringConfiguration(
@@ -138,7 +155,7 @@ export default function Settings() {
     );
     setFormData({
       ...mapProfileToForm(selectedProfile),
-      scoring_mode: scoringConfig.scoringMode,
+      scoring_mode: selectedProfile.is_default_profile ? 'option_1' : scoringConfig.scoringMode,
       min_scoring_speed: scoringConfig.minScoringSpeed,
       balance_enabled: scoringConfig.balanceEnabled,
       continuity_enabled: scoringConfig.continuityEnabled,
@@ -152,15 +169,12 @@ export default function Settings() {
       if (!selectedProfile?.id && !isDraftProfile) {
         throw new Error('Nenhum perfil selecionado.');
       }
-      if (isDefaultProfileLocked) {
-        throw new Error('O perfil default é fixo. Use "Guardar como novo" para criar uma variação.');
-      }
       const nextName = isDraftProfile
         ? String(newProfileName || '').trim()
-        : (selectedProfile.is_default_profile ? 'default' : String(profileName || '').trim());
+        : (selectedProfile.is_default_profile ? SETTINGS_FIXED_PROFILE_NAME : String(profileName || '').trim());
       if (!nextName) throw new Error('O nome do perfil é obrigatório.');
-      if (!selectedProfile?.is_default_profile && nextName.toLowerCase() === 'default') {
-        throw new Error('default é reservado para o perfil padrão.');
+      if (!selectedProfile?.is_default_profile && ['default', 'frescogo', 'frescogo (default)'].includes(nextName.toLowerCase())) {
+        throw new Error('FrescoGO (Default) é reservado para o perfil fixo.');
       }
       const payload = {
         ...data,
@@ -184,7 +198,7 @@ export default function Settings() {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
       setAppLanguage(savedSettings.language || 'pt-BR');
       setSelectedProfileId(savedSettings.id);
-      setProfileName(savedSettings.profile_name || 'default');
+      setProfileName(savedSettings.profile_name || SETTINGS_FIXED_PROFILE_NAME);
       setNewProfileName('');
       toast.success(t('save'));
     },
@@ -196,8 +210,8 @@ export default function Settings() {
       if (!selectedProfile && !isDraftProfile) throw new Error('Nenhum perfil selecionado.');
       const nextName = String(newProfileName || '').trim();
       if (!nextName) throw new Error('O nome do novo perfil é obrigatório.');
-      if (nextName.toLowerCase() === 'default') {
-        throw new Error('default é reservado para o perfil padrão.');
+      if (['default', 'frescogo', 'frescogo (default)'].includes(nextName.toLowerCase())) {
+        throw new Error('FrescoGO (Default) é reservado para o perfil fixo.');
       }
       const payload = {
         ...formData,
@@ -213,7 +227,7 @@ export default function Settings() {
     },
     onSuccess: async (created) => {
       setSelectedProfileId(created.id);
-      setProfileName(created.profile_name || 'default');
+      setProfileName(created.profile_name || SETTINGS_FIXED_PROFILE_NAME);
       setNewProfileName('');
       setAppLanguage(created.language || 'pt-BR');
       await queryClient.invalidateQueries({ queryKey: ['settings-profiles', user?.id] });
@@ -226,7 +240,7 @@ export default function Settings() {
   const deleteMutation = useMutation({
     mutationFn: async () => {
       if (!selectedProfile?.id) throw new Error('Nenhum perfil selecionado.');
-      if (selectedProfile.is_default_profile) throw new Error('O perfil default não pode ser apagado.');
+      if (selectedProfile.is_default_profile) throw new Error('O perfil fixo FrescoGO (Default) não pode ser apagado.');
       await deleteSettings(selectedProfile.id);
       return selectedProfile.id;
     },
@@ -237,7 +251,7 @@ export default function Settings() {
         await setActiveSettingsProfile(nextProfile.id, user.id);
       }
       setSelectedProfileId(nextProfile?.id || null);
-      setProfileName(nextProfile?.profile_name || 'default');
+      setProfileName(nextProfile?.profile_name || SETTINGS_FIXED_PROFILE_NAME);
       setNewProfileName(nextProfile?.is_default_profile ? '' : nextProfile?.profile_name || '');
       setFormData(nextProfile ? mapProfileToForm(nextProfile) : defaultFormData);
       await queryClient.invalidateQueries({ queryKey: ['settings-profiles', user?.id] });
@@ -258,7 +272,7 @@ export default function Settings() {
     const nextProfile = profileOptions.find((item) => item.id === profileId);
     if (!nextProfile) return;
     setSelectedProfileId(profileId);
-    setProfileName(nextProfile.profile_name || 'default');
+    setProfileName(nextProfile.profile_name || SETTINGS_FIXED_PROFILE_NAME);
     setNewProfileName('');
     setFormData(mapProfileToForm(nextProfile));
     setAppLanguage(nextProfile.language || 'pt-BR');
@@ -270,7 +284,7 @@ export default function Settings() {
   };
 
   const handleChange = (field, value) => setFormData((prev) => (
-    isDefaultProfileLocked ? prev : (
+    isFixedProfileFieldLocked(field) ? prev : (
     field === 'scoring_mode'
       ? ({
           ...prev,
@@ -292,7 +306,7 @@ export default function Settings() {
       : { ...prev, [field]: value }
     )
   ));
-  const handleNumericChange = (field, value) => setFormData((prev) => (isDefaultProfileLocked ? prev : ({ ...prev, [field]: parseFloat(value) || 0 })));
+  const handleNumericChange = (field, value) => setFormData((prev) => (isFixedProfileFieldLocked(field) ? prev : ({ ...prev, [field]: parseFloat(value) || 0 })));
 
   if (isLoading) {
     return <div className="min-h-[100dvh] bg-gradient-to-b from-[#1a1a2e] to-[#0d0d1a] flex items-center justify-center"><div className="animate-spin w-8 h-8 border-4 border-[#e94560] border-t-transparent rounded-full" /></div>;
@@ -307,9 +321,9 @@ export default function Settings() {
       title={t('settings')}
       backTo={returnTo}
       headerRight={(
-        <Button onClick={() => saveMutation.mutate(formData)} disabled={saveMutation.isPending || isDefaultProfileLocked} className="bg-[#e94560] hover:bg-[#c73e54] rounded-full px-5 h-10 text-sm md:h-12 md:text-base font-semibold disabled:opacity-50">
+        <Button onClick={() => saveMutation.mutate(formData)} disabled={saveMutation.isPending} className="bg-[#e94560] hover:bg-[#c73e54] rounded-full px-5 h-10 text-sm md:h-12 md:text-base font-semibold disabled:opacity-50">
           <Save className="w-5 h-5 mr-2" />
-          {isDefaultProfileLocked ? 'Perfil fixo' : t('save')}
+          {t('save')}
         </Button>
       )}
       contentClassName="pt-4"
@@ -317,7 +331,7 @@ export default function Settings() {
       <div className="space-y-8 max-w-lg mx-auto">
         <LanguageSelector
           value={formData.language}
-          disabled={isDefaultProfileLocked}
+          disabled={false}
           onChange={(value) => {
             handleChange('language', value);
             setAppLanguage(value);
@@ -335,7 +349,7 @@ export default function Settings() {
                 photoUrl={formData.player_left_photo}
                 onPhotoChange={(url) => handleChange('player_left_photo', url)}
                 label={t('leftPlayer')}
-                disabled={isDefaultProfileLocked}
+                disabled={false}
               />
               <div className="w-full space-y-1">
                 <div className="flex items-center justify-between gap-3">
@@ -344,14 +358,14 @@ export default function Settings() {
                     <input
                       type="checkbox"
                       checked={formData.player_left_radar_enabled}
-                      disabled={isDefaultProfileLocked}
+                      disabled={false}
                       onChange={(e) => handleChange('player_left_radar_enabled', e.target.checked)}
                       className="h-4 w-4 rounded border-[#3a3a5a] bg-[#0d0d1a] text-[#0f9b8e] focus:ring-[#0f9b8e] disabled:cursor-not-allowed disabled:opacity-60"
                     />
                     <span>{t('radar')}</span>
                   </label>
                 </div>
-                <Input value={formData.player_left_name} onChange={(e) => handleChange('player_left_name', e.target.value)} disabled={isDefaultProfileLocked} placeholder={t('leftPlayer')} className="bg-[#0d0d1a] border-[#3a3a5a] text-white text-base h-11 font-semibold text-center placeholder:text-gray-400 disabled:cursor-not-allowed disabled:opacity-60" />
+                <Input value={formData.player_left_name} onChange={(e) => handleChange('player_left_name', e.target.value)} disabled={false} placeholder={t('leftPlayer')} className="bg-[#0d0d1a] border-[#3a3a5a] text-white text-base h-11 font-semibold text-center placeholder:text-gray-400 disabled:cursor-not-allowed disabled:opacity-60" />
               </div>
             </div>
             <div className="flex flex-col items-center gap-3">
@@ -359,7 +373,7 @@ export default function Settings() {
                 photoUrl={formData.player_right_photo}
                 onPhotoChange={(url) => handleChange('player_right_photo', url)}
                 label={t('rightPlayer')}
-                disabled={isDefaultProfileLocked}
+                disabled={false}
               />
               <div className="w-full space-y-1">
                 <div className="flex items-center justify-between gap-3">
@@ -368,14 +382,14 @@ export default function Settings() {
                     <input
                       type="checkbox"
                       checked={formData.player_right_radar_enabled}
-                      disabled={isDefaultProfileLocked}
+                      disabled={false}
                       onChange={(e) => handleChange('player_right_radar_enabled', e.target.checked)}
                       className="h-4 w-4 rounded border-[#3a3a5a] bg-[#0d0d1a] text-[#0f9b8e] focus:ring-[#0f9b8e] disabled:cursor-not-allowed disabled:opacity-60"
                     />
                     <span>{t('radar')}</span>
                   </label>
                 </div>
-                <Input value={formData.player_right_name} onChange={(e) => handleChange('player_right_name', e.target.value)} disabled={isDefaultProfileLocked} placeholder={t('rightPlayer')} className="bg-[#0d0d1a] border-[#3a3a5a] text-white text-base h-11 font-semibold text-center placeholder:text-gray-400 disabled:cursor-not-allowed disabled:opacity-60" />
+                <Input value={formData.player_right_name} onChange={(e) => handleChange('player_right_name', e.target.value)} disabled={false} placeholder={t('rightPlayer')} className="bg-[#0d0d1a] border-[#3a3a5a] text-white text-base h-11 font-semibold text-center placeholder:text-gray-400 disabled:cursor-not-allowed disabled:opacity-60" />
               </div>
             </div>
           </div>
@@ -389,15 +403,15 @@ export default function Settings() {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label className="text-gray-400 text-base">{t('distanceMeters')}</Label>
-              <Input type="number" value={formData.distance_meters} onChange={(e) => handleNumericChange('distance_meters', e.target.value)} disabled={isDefaultProfileLocked} className="bg-[#0d0d1a] border-[#3a3a5a] text-white text-2xl h-16 font-semibold disabled:cursor-not-allowed disabled:opacity-60" min="1" step="0.1" />
+              <Input type="number" value={formData.distance_meters} onChange={(e) => handleNumericChange('distance_meters', e.target.value)} disabled={isFixedProfileFieldLocked('distance_meters')} className="bg-[#0d0d1a] border-[#3a3a5a] text-white text-2xl h-16 font-semibold disabled:cursor-not-allowed disabled:opacity-60" min="1" step="0.1" />
             </div>
             <div className="space-y-2">
               <Label className="text-gray-400 text-base">{t('matchDurationMinutes')}</Label>
-              <Input type="number" value={formData.match_duration_minutes} onChange={(e) => handleNumericChange('match_duration_minutes', e.target.value)} disabled={isDefaultProfileLocked} className="bg-[#0d0d1a] border-[#3a3a5a] text-white text-2xl h-16 font-semibold disabled:cursor-not-allowed disabled:opacity-60" min="1" step="1" />
+              <Input type="number" value={formData.match_duration_minutes} onChange={(e) => handleNumericChange('match_duration_minutes', e.target.value)} disabled={isFixedProfileFieldLocked('match_duration_minutes')} className="bg-[#0d0d1a] border-[#3a3a5a] text-white text-2xl h-16 font-semibold disabled:cursor-not-allowed disabled:opacity-60" min="1" step="1" />
             </div>
             <div className="space-y-2">
               <Label className="text-gray-400 text-base">{t('warmupDurationMinutes')}</Label>
-              <Input type="number" value={formData.warmup_duration_minutes} onChange={(e) => handleNumericChange('warmup_duration_minutes', e.target.value)} disabled={isDefaultProfileLocked} className="bg-[#0d0d1a] border-[#3a3a5a] text-white text-2xl h-16 font-semibold disabled:cursor-not-allowed disabled:opacity-60" min="0" step="1" />
+              <Input type="number" value={formData.warmup_duration_minutes} onChange={(e) => handleNumericChange('warmup_duration_minutes', e.target.value)} disabled={isFixedProfileFieldLocked('warmup_duration_minutes')} className="bg-[#0d0d1a] border-[#3a3a5a] text-white text-2xl h-16 font-semibold disabled:cursor-not-allowed disabled:opacity-60" min="0" step="1" />
             </div>
           </div>
         </div>
@@ -417,7 +431,7 @@ export default function Settings() {
               </div>
               {selectedProfile?.is_default_profile && (
                 <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-200">
-                  default
+                  {SETTINGS_FIXED_PROFILE_NAME}
                 </span>
               )}
               {isDraftProfile && (
@@ -439,7 +453,6 @@ export default function Settings() {
                   {profileOptions.map((profile) => (
                     <option key={profile.id} value={profile.id}>
                       {profile.profile_name || 'Perfil sem nome'}
-                      {profile.is_default_profile ? ' (default)' : ''}
                     </option>
                   ))}
                 </select>
@@ -448,9 +461,9 @@ export default function Settings() {
                     ? 'Modo criação: as alterações serão guardadas como um perfil novo.'
                     : 'Modo edição: as alterações vão atualizar o perfil selecionado.'}
                 </p>
-                {isDefaultProfileLocked && (
+                {isFixedProfile && (
                   <p className="text-xs text-amber-300/90">
-                    O perfil padrão é fixo. Use <span className="font-semibold">Guardar como novo</span> para criar uma variante.
+                    O perfil fixo mantém duração e regras bloqueadas. A distância pode ser ajustada. Use <span className="font-semibold">Guardar como novo</span> para criar uma variante.
                   </p>
                 )}
               </div>
@@ -463,12 +476,12 @@ export default function Settings() {
                   value={isDraftProfile ? newProfileName : profileName}
                   onChange={(e) => (isDraftProfile ? setNewProfileName(e.target.value) : setProfileName(e.target.value))}
                   placeholder={isDraftProfile ? 'Ex.: Torneio, Treino, Finais' : 'Ex.: Torneio, Treino, Finais'}
-                  disabled={selectedProfile?.is_default_profile && !isDraftProfile}
+                  disabled={isFixedProfileNameLocked}
                   className={`text-white text-base h-11 font-semibold placeholder:text-gray-400 transition-colors ${isDraftProfile ? 'bg-[#2a1b0d] border-amber-400/60 focus:border-amber-300' : 'bg-[#1a1a2e] border-[#3a3a5a]'}`}
                 />
                 {!isDraftProfile && selectedProfile?.is_default_profile && (
                   <p className="text-xs text-amber-300/90">
-                    O nome do perfil padrão é fixo em <span className="font-semibold">default</span>.
+                    O nome do perfil fixo é <span className="font-semibold">{SETTINGS_FIXED_PROFILE_NAME}</span>.
                   </p>
                 )}
               </div>
@@ -478,11 +491,11 @@ export default function Settings() {
               <Button
                 type="button"
                 onClick={() => saveMutation.mutate(formData)}
-                disabled={saveMutation.isPending || isDefaultProfileLocked}
-                className={`min-w-[152px] flex-1 rounded-full px-4 h-10 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60 ${isDefaultProfileLocked ? 'bg-amber-500 text-[#0d0d1a]' : (isDraftProfile ? 'bg-amber-500 hover:bg-amber-400 text-[#0d0d1a]' : 'bg-[#0f9b8e] hover:bg-[#0d847a] text-white')}`}
+                disabled={saveMutation.isPending}
+                className={`min-w-[152px] flex-1 rounded-full px-4 h-10 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60 ${isDraftProfile ? 'bg-amber-500 hover:bg-amber-400 text-[#0d0d1a]' : 'bg-[#0f9b8e] hover:bg-[#0d847a] text-white'}`}
               >
                 <Save className="w-4 h-4 mr-2" />
-                {isDefaultProfileLocked ? 'Perfil fixo' : (isDraftProfile ? 'Criar perfil' : 'Guardar perfil')}
+                {isDraftProfile ? 'Criar perfil' : 'Guardar perfil'}
               </Button>
               <Button
                 type="button"
@@ -508,12 +521,22 @@ export default function Settings() {
           <div className="bg-[#0d0d1a] rounded-xl p-4 border border-[#2a2a4a] mb-4">
             <Label className="text-gray-300 text-base font-semibold block mb-3">{t('scoringFormula')}</Label>
             <div className="space-y-3">
-              <label className="flex items-start gap-3 cursor-pointer">
-                <input type="radio" name="scoring_mode" value="option_1" checked={formData.scoring_mode === 'option_1'} onChange={() => handleChange('scoring_mode', 'option_1')} disabled={isDefaultProfileLocked} className="mt-1 disabled:cursor-not-allowed disabled:opacity-60" />
-                <div><p className="text-white font-semibold">{t('option1')}</p><p className="text-gray-400 text-sm">{t('scoringFormulaOption1Desc')}</p></div>
+              <label className={`flex items-start gap-3 cursor-pointer rounded-xl px-3 py-2 border transition-colors ${isOption1Selected ? 'border-emerald-400/50 bg-emerald-500/10 shadow-[0_0_0_1px_rgba(16,185,129,0.14)]' : 'border-transparent'}`}>
+                <input type="radio" name="scoring_mode" value="option_1" checked={isOption1Selected} onChange={() => handleChange('scoring_mode', 'option_1')} disabled={isFixedProfileFieldLocked('scoring_mode')} className="mt-1 accent-[#0f9b8e] disabled:cursor-not-allowed disabled:opacity-60" />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="text-white font-semibold">{t('option1')}</p>
+                    {isFixedProfile && (
+                      <span className="inline-flex items-center rounded-full border border-emerald-400/40 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-200">
+                        selecionada
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-gray-400 text-sm">{t('scoringFormulaOption1Desc')}</p>
+                </div>
               </label>
-              <label className="flex items-start gap-3 cursor-pointer">
-                <input type="radio" name="scoring_mode" value="option_2" checked={formData.scoring_mode === 'option_2'} onChange={() => handleChange('scoring_mode', 'option_2')} disabled={isDefaultProfileLocked} className="mt-1 disabled:cursor-not-allowed disabled:opacity-60" />
+              <label className={`flex items-start gap-3 cursor-pointer rounded-xl px-3 py-2 border transition-colors ${isFixedProfile && displayedScoringMode !== 'option_2' ? 'border-[#2a2a4a] bg-[#0d0d1a]' : 'border-transparent'}`}>
+                <input type="radio" name="scoring_mode" value="option_2" checked={displayedScoringMode === 'option_2'} onChange={() => handleChange('scoring_mode', 'option_2')} disabled={isFixedProfileFieldLocked('scoring_mode')} className="mt-1 accent-[#0f9b8e] disabled:cursor-not-allowed disabled:opacity-60" />
                 <div><p className="text-white font-semibold">{t('option2')}</p><p className="text-gray-400 text-sm">{t('scoringFormulaOption2Desc')}</p></div>
               </label>
             </div>
@@ -521,30 +544,30 @@ export default function Settings() {
 
           <div className="bg-[#0d0d1a] rounded-xl p-4 border border-[#2a2a4a] mb-4">
             <Label className="text-gray-300 text-base font-semibold block mb-2">{t('minSpeedScore')}</Label>
-            <Input type="number" value={formData.min_scoring_speed} onChange={(e) => handleNumericChange('min_scoring_speed', e.target.value)} disabled={isDefaultProfileLocked} className="bg-[#1a1a2e] border-[#3a3a5a] text-white text-2xl h-16 font-semibold disabled:cursor-not-allowed disabled:opacity-60" min="0" step="1" />
+            <Input type="number" value={formData.min_scoring_speed} onChange={(e) => handleNumericChange('min_scoring_speed', e.target.value)} disabled={isFixedProfileFieldLocked('min_scoring_speed')} className="bg-[#1a1a2e] border-[#3a3a5a] text-white text-2xl h-16 font-semibold disabled:cursor-not-allowed disabled:opacity-60" min="0" step="1" />
           </div>
 
           <div className="bg-[#0d0d1a] rounded-xl p-4 border border-[#2a2a4a] mb-4">
             <Label className="text-gray-300 text-base font-semibold block mb-2">{t('freeDrops')}</Label>
             <p className="text-gray-500 text-sm mb-3">{t('freeDropsDesc')}</p>
-            <Input type="number" value={formData.free_ball_drops} onChange={(e) => handleNumericChange('free_ball_drops', e.target.value)} disabled={isDefaultProfileLocked} className="bg-[#1a1a2e] border-[#3a3a5a] text-white text-2xl h-16 font-semibold disabled:cursor-not-allowed disabled:opacity-60" min="0" step="1" />
+            <Input type="number" value={formData.free_ball_drops} onChange={(e) => handleNumericChange('free_ball_drops', e.target.value)} disabled={isFixedProfileFieldLocked('free_ball_drops')} className="bg-[#1a1a2e] border-[#3a3a5a] text-white text-2xl h-16 font-semibold disabled:cursor-not-allowed disabled:opacity-60" min="0" step="1" />
           </div>
 
           <div className="bg-[#0d0d1a] rounded-xl p-4 border border-[#2a2a4a] mb-6">
             <Label className="text-gray-300 text-base font-semibold block mb-3">{t('dropsToEnd')}</Label>
             <div className="flex items-center gap-3 mb-3">
-              <button type="button" disabled={isDefaultProfileLocked} onClick={() => handleChange('count_ball_drops', !formData.count_ball_drops)} className={`relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-60 ${formData.count_ball_drops ? 'bg-[#0f9b8e]' : 'bg-gray-700'}`}>
+              <button type="button" disabled={isFixedProfileFieldLocked('count_ball_drops')} onClick={() => handleChange('count_ball_drops', !formData.count_ball_drops)} className={`relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-60 ${formData.count_ball_drops ? 'bg-[#0f9b8e]' : 'bg-gray-700'}`}>
                 <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${formData.count_ball_drops ? 'translate-x-6' : 'translate-x-0'}`} />
               </button>
               <span className="text-gray-400 text-sm">{formData.count_ball_drops ? t('enabledEndByDrops') : t('disabledEndByDrops')}</span>
             </div>
-            {formData.count_ball_drops && <Input type="number" value={formData.max_ball_drops} onChange={(e) => handleNumericChange('max_ball_drops', e.target.value)} disabled={isDefaultProfileLocked} className="bg-[#1a1a2e] border-[#3a3a5a] text-white text-2xl h-16 font-semibold disabled:cursor-not-allowed disabled:opacity-60" min="1" step="1" />}
+            {formData.count_ball_drops && <Input type="number" value={formData.max_ball_drops} onChange={(e) => handleNumericChange('max_ball_drops', e.target.value)} disabled={isFixedProfileFieldLocked('max_ball_drops')} className="bg-[#1a1a2e] border-[#3a3a5a] text-white text-2xl h-16 font-semibold disabled:cursor-not-allowed disabled:opacity-60" min="1" step="1" />}
           </div>
 
           <div className="bg-[#0d0d1a] rounded-xl p-4 border border-[#2a2a4a] mb-2">
             <Label className="text-gray-300 text-base font-semibold block mb-3">{t('balanceRule')}</Label>
             <div className="flex items-center gap-3">
-              <button type="button" disabled={isDefaultProfileLocked} onClick={() => handleChange('balance_enabled', !formData.balance_enabled)} className={`relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-60 ${formData.balance_enabled ? 'bg-[#0f9b8e]' : 'bg-gray-700'}`}>
+              <button type="button" disabled={isFixedProfileFieldLocked('balance_enabled')} onClick={() => handleChange('balance_enabled', !formData.balance_enabled)} className={`relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-60 ${formData.balance_enabled ? 'bg-[#0f9b8e]' : 'bg-gray-700'}`}>
                 <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${formData.balance_enabled ? 'translate-x-6' : 'translate-x-0'}`} />
               </button>
               <span className="text-gray-400 text-sm">{formData.balance_enabled ? t('balanceOn') : t('balanceOff')}</span>
@@ -554,7 +577,7 @@ export default function Settings() {
           <div className="bg-[#0d0d1a] rounded-xl p-4 border border-[#2a2a4a] mb-2">
             <Label className="text-gray-300 text-base font-semibold block mb-3">{t('continuityRule')}</Label>
             <div className="flex items-center gap-3">
-              <button type="button" disabled={isDefaultProfileLocked} onClick={() => handleChange('continuity_enabled', !formData.continuity_enabled)} className={`relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-60 ${formData.continuity_enabled ? 'bg-[#0f9b8e]' : 'bg-gray-700'}`}>
+              <button type="button" disabled={isFixedProfileFieldLocked('continuity_enabled')} onClick={() => handleChange('continuity_enabled', !formData.continuity_enabled)} className={`relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-60 ${formData.continuity_enabled ? 'bg-[#0f9b8e]' : 'bg-gray-700'}`}>
                 <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${formData.continuity_enabled ? 'translate-x-6' : 'translate-x-0'}`} />
               </button>
               <span className="text-gray-400 text-sm">{formData.continuity_enabled ? t('continuityOn') : t('continuityOff')}</span>
@@ -564,7 +587,7 @@ export default function Settings() {
           <div className="bg-[#0d0d1a] rounded-xl p-4 border border-[#2a2a4a] mb-2">
             <Label className="text-gray-300 text-base font-semibold block mb-3">{t('powerRule')}</Label>
             <div className="flex items-center gap-3">
-              <button type="button" disabled={isDefaultProfileLocked} onClick={() => handleChange('power_enabled', !formData.power_enabled)} className={`relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-60 ${formData.power_enabled ? 'bg-[#0f9b8e]' : 'bg-gray-700'}`}>
+              <button type="button" disabled={isFixedProfileFieldLocked('power_enabled')} onClick={() => handleChange('power_enabled', !formData.power_enabled)} className={`relative flex-shrink-0 w-12 h-6 rounded-full transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-60 ${formData.power_enabled ? 'bg-[#0f9b8e]' : 'bg-gray-700'}`}>
                 <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${formData.power_enabled ? 'translate-x-6' : 'translate-x-0'}`} />
               </button>
               <span className="text-gray-400 text-sm">{formData.power_enabled ? t('powerOn') : t('powerOff')}</span>

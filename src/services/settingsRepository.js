@@ -2,7 +2,8 @@ import { clone, generateId, readJson, removeItem, sortItems, writeJson } from '.
 import { apiRequest, isServerStorageMode } from './apiClient';
 
 const SETTINGS_SESSION_KEY = 'frescobol_settings_session_v1';
-const DEFAULT_PROFILE_NAME = 'default';
+const DEFAULT_PROFILE_NAME = 'FrescoGO (Default)';
+const LEGACY_DEFAULT_PROFILE_NAMES = ['default', 'frescogo'];
 const DEFAULT_PROFILE_VALUES = {
   duo_name: '',
   visibility: 'private',
@@ -30,6 +31,21 @@ export const SETTINGS_PROFILE_DEFAULTS = {
   ...DEFAULT_PROFILE_VALUES,
 };
 
+export const SETTINGS_FIXED_PROFILE_NAME = DEFAULT_PROFILE_NAME;
+
+const DEFAULT_PROFILE_LOCKED_FIELDS = {
+  match_duration_minutes: 'number',
+  warmup_duration_minutes: 'number',
+  scoring_mode: 'string',
+  min_scoring_speed: 'number',
+  free_ball_drops: 'number',
+  max_ball_drops: 'number',
+  count_ball_drops: 'boolean',
+  balance_enabled: 'boolean',
+  continuity_enabled: 'boolean',
+  power_enabled: 'boolean',
+};
+
 function readCachedSettings() {
   return readJson(SETTINGS_SESSION_KEY, []);
 }
@@ -48,6 +64,30 @@ function normalizeProfileName(profileName, isDefaultProfile = false) {
   return normalized || 'Perfil sem nome';
 }
 
+function isReservedFixedProfileName(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return [DEFAULT_PROFILE_NAME.toLowerCase(), ...LEGACY_DEFAULT_PROFILE_NAMES].includes(normalized);
+}
+
+function normalizeLockedProfileField(field, value) {
+  const fallback = DEFAULT_PROFILE_VALUES[field];
+  if (DEFAULT_PROFILE_LOCKED_FIELDS[field] === 'number') {
+    const nextValue = Number(value ?? fallback);
+    return Number.isFinite(nextValue) ? nextValue : Number(fallback);
+  }
+  if (DEFAULT_PROFILE_LOCKED_FIELDS[field] === 'boolean') {
+    return Boolean(value ?? fallback);
+  }
+  return String((value ?? fallback) || '').trim();
+}
+
+function hasLockedDefaultProfileChanges(existing = {}, data = {}) {
+  return Object.keys(DEFAULT_PROFILE_LOCKED_FIELDS).some((field) => {
+    if (!(field in data)) return false;
+    return normalizeLockedProfileField(field, data[field]) !== normalizeLockedProfileField(field, existing[field]);
+  });
+}
+
 function normalizeSettingsRecord(data = {}) {
   const isDefaultProfile = Boolean(data.is_default_profile);
   const profileName = normalizeProfileName(data.profile_name, isDefaultProfile);
@@ -63,16 +103,7 @@ function normalizeSettingsRecord(data = {}) {
 
 function isDefaultProfileOutOfSync(profile = {}) {
   return (
-    String(profile.duo_name || '').trim() !== DEFAULT_PROFILE_VALUES.duo_name ||
-    String(profile.visibility || '').trim() !== DEFAULT_PROFILE_VALUES.visibility ||
-    String(profile.player_left_name || '').trim() !== DEFAULT_PROFILE_VALUES.player_left_name ||
-    String(profile.player_right_name || '').trim() !== DEFAULT_PROFILE_VALUES.player_right_name ||
-    String(profile.player_left_photo || '').trim() !== DEFAULT_PROFILE_VALUES.player_left_photo ||
-    String(profile.player_right_photo || '').trim() !== DEFAULT_PROFILE_VALUES.player_right_photo ||
-    Boolean(profile.player_left_radar_enabled ?? DEFAULT_PROFILE_VALUES.player_left_radar_enabled) !== DEFAULT_PROFILE_VALUES.player_left_radar_enabled ||
-    Boolean(profile.player_right_radar_enabled ?? DEFAULT_PROFILE_VALUES.player_right_radar_enabled) !== DEFAULT_PROFILE_VALUES.player_right_radar_enabled ||
-    String(profile.language || '').trim() !== DEFAULT_PROFILE_VALUES.language ||
-    Number(profile.distance_meters ?? DEFAULT_PROFILE_VALUES.distance_meters) !== DEFAULT_PROFILE_VALUES.distance_meters ||
+    String(profile.profile_name || '').trim() !== DEFAULT_PROFILE_NAME ||
     Number(profile.match_duration_minutes ?? DEFAULT_PROFILE_VALUES.match_duration_minutes) !== DEFAULT_PROFILE_VALUES.match_duration_minutes ||
     Number(profile.warmup_duration_minutes ?? DEFAULT_PROFILE_VALUES.warmup_duration_minutes) !== DEFAULT_PROFILE_VALUES.warmup_duration_minutes ||
     Number(profile.min_scoring_speed ?? DEFAULT_PROFILE_VALUES.min_scoring_speed) !== DEFAULT_PROFILE_VALUES.min_scoring_speed ||
@@ -136,10 +167,19 @@ export async function ensureDefaultSettingsProfile(ownerUserId, ownerEmail = '',
     if (!isDefaultProfileOutOfSync(defaultProfile)) return defaultProfile;
     return updateSettings(defaultProfile.id, {
       ...defaultProfile,
-      ...DEFAULT_PROFILE_VALUES,
       profile_name: DEFAULT_PROFILE_NAME,
       is_default_profile: true,
       is_active_profile: Boolean(defaultProfile.is_active_profile),
+      match_duration_minutes: DEFAULT_PROFILE_VALUES.match_duration_minutes,
+      warmup_duration_minutes: DEFAULT_PROFILE_VALUES.warmup_duration_minutes,
+      scoring_mode: DEFAULT_PROFILE_VALUES.scoring_mode,
+      min_scoring_speed: DEFAULT_PROFILE_VALUES.min_scoring_speed,
+      free_ball_drops: DEFAULT_PROFILE_VALUES.free_ball_drops,
+      max_ball_drops: DEFAULT_PROFILE_VALUES.max_ball_drops,
+      count_ball_drops: DEFAULT_PROFILE_VALUES.count_ball_drops,
+      balance_enabled: DEFAULT_PROFILE_VALUES.balance_enabled,
+      continuity_enabled: DEFAULT_PROFILE_VALUES.continuity_enabled,
+      power_enabled: DEFAULT_PROFILE_VALUES.power_enabled,
     }, { allowDefaultRepair: true });
   }
 
@@ -160,7 +200,10 @@ export async function loadLatestSettingsForUser(ownerUserId, ownerEmail = '') {
 export async function createSettings(data, options = {}) {
   const recordData = normalizeSettingsRecord(data);
   if (recordData.is_default_profile && !options.allowDefaultProfileCreation) {
-    throw new Error('O perfil default é fixo e é gerido pelo sistema.');
+    throw new Error('O perfil fixo FrescoGO (Default) é gerido pelo sistema.');
+  }
+  if (!recordData.is_default_profile && isReservedFixedProfileName(recordData.profile_name)) {
+    throw new Error('FrescoGO (Default) é reservado para o perfil fixo.');
   }
 
   if (isServerStorageMode()) {
@@ -198,11 +241,8 @@ export async function updateSettings(id, data, options = {}) {
       const current = readCachedSettings();
       const existing = current.find((item) => item.id === id) || null;
       if (existing?.is_default_profile && !options.allowDefaultRepair) {
-        const allowedKeys = new Set(['is_active_profile']);
-        const incomingKeys = Object.keys(data || {});
-        const hasDisallowedChange = incomingKeys.some((key) => !allowedKeys.has(key));
-        if (hasDisallowedChange) {
-          throw new Error('O perfil default é fixo. Crie um novo perfil para guardar alterações.');
+        if (hasLockedDefaultProfileChanges(existing, data)) {
+          throw new Error('O perfil fixo FrescoGO (Default) mantém duração e regras bloqueadas.');
         }
       }
       const mergedForServer = existing
@@ -237,11 +277,8 @@ export async function updateSettings(id, data, options = {}) {
 
   const existing = current[index];
   if (existing.is_default_profile && !options.allowDefaultRepair) {
-    const allowedKeys = new Set(['is_active_profile']);
-    const incomingKeys = Object.keys(data || {});
-    const hasDisallowedChange = incomingKeys.some((key) => !allowedKeys.has(key));
-    if (hasDisallowedChange) {
-      throw new Error('O perfil default é fixo. Crie um novo perfil para guardar alterações.');
+    if (hasLockedDefaultProfileChanges(existing, data)) {
+      throw new Error('O perfil fixo FrescoGO (Default) mantém duração e regras bloqueadas.');
     }
   }
   const updated = {
@@ -259,6 +296,10 @@ export async function updateSettings(id, data, options = {}) {
   };
   if (updated.is_default_profile) {
     updated.profile_name = DEFAULT_PROFILE_NAME;
+    updated.is_default_profile = true;
+    if (isReservedFixedProfileName(updated.profile_name)) {
+      updated.profile_name = DEFAULT_PROFILE_NAME;
+    }
   }
   current[index] = updated;
   writeCachedSettings(current);
@@ -281,7 +322,7 @@ export async function deleteSettings(id) {
   const current = readCachedSettings();
   const target = current.find((item) => item.id === id);
   if (target?.is_default_profile) {
-    throw new Error('O perfil default não pode ser apagado.');
+    throw new Error('O perfil fixo FrescoGO (Default) não pode ser apagado.');
   }
 
   if (isServerStorageMode()) {

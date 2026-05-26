@@ -6,10 +6,12 @@ export function hasWarmupInProgress({
 }
 
 export function shouldLockWarmupControls({
+  gameStarted = false,
   isWarmupCompleted = false,
   warmupStartedAtMs = null,
   warmupAccumulatedMs = 0,
 }) {
+  if (gameStarted) return true;
   return !isWarmupCompleted && hasWarmupInProgress({ warmupStartedAtMs, warmupAccumulatedMs });
 }
 

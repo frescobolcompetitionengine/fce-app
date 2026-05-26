@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/AuthContext';
 
 const DEFAULT_LANGUAGE = 'pt-BR';
+let activeLanguage = null;
 
 const messages = {
   'pt-BR': {
@@ -116,6 +117,11 @@ const messages = {
     reports: 'Relatórios',
     administration: 'Administração',
     adminPanel: 'Painel Administrativo',
+    adminSettingsTooltip: 'Abre as configurações da conta, idioma e perfis de regras.',
+    adminMeasurementTooltip: 'Abre a tela para medir e registar jogadas.',
+    adminReportsTooltip: 'Mostra o histórico e os relatórios guardados.',
+    adminSystemTooltip: 'Acede aos backups, manutenção e ferramentas do sistema.',
+    adminLogoutTooltip: 'Termina a sessão atual.',
     systemAdmin: 'Administração do Sistema',
     newRegistration: 'Centro de Usuários',
     adminRegistrationDesc: 'Cadastre usuários, defina o tipo de conta e controle o prazo.',
@@ -330,8 +336,6 @@ const messages = {
     analysisBonusCount: 'Bónus',
     analysisBonusAmount: 'Bónus',
     analysisNote: 'Nenhum marcador + coincide com máximas. O padrão observado é mais compatível com continuidade/ritmo do que com picos de velocidade.',
-    insertDemoMatch: 'Inserir jogo simulado',
-    creatingDemoMatch: 'Criando jogo simulado...',
     createSection1Title: '1. Nome, contacto e email',
     createSection1Hint: 'Os dados básicos do usuário ficam agrupados aqui para evitar campos desencontrados.',
     createSection2Title: '2. Tipo de user e password',
@@ -459,6 +463,11 @@ const messages = {
     measurement: 'Measurement',
     reports: 'Reports',
     administration: 'Administration',
+    adminSettingsTooltip: 'Open account settings, language and rule profiles.',
+    adminMeasurementTooltip: 'Open the screen to measure and record plays.',
+    adminReportsTooltip: 'View saved history and reports.',
+    adminSystemTooltip: 'Access backups, maintenance and system tools.',
+    adminLogoutTooltip: 'Sign out of the current session.',
     systemAdmin: 'System Administration',
     newRegistration: 'New Registration',
     adminRegistrationDesc: 'Register users, define the account type and control the term.',
@@ -673,8 +682,6 @@ const messages = {
       analysisBonusCount: 'Bonus count',
       analysisBonusAmount: 'Bonus',
       analysisNote: 'No + marker matches a maximum. The observed pattern looks more like continuity/rhythm than speed peaks.',
-      insertDemoMatch: 'Insert demo match',
-      creatingDemoMatch: 'Creating demo match...',
       createSection1Title: '1. Name, contact and email',
       createSection1Hint: 'The basic user data stays grouped here to avoid scattered fields.',
       createSection2Title: '2. User type and password',
@@ -773,6 +780,11 @@ const messages = {
       startGameFailed: '試合の開始に失敗しました。',
       loginTitle: 'ログイン', email: 'メール', password: 'パスワード', signIn: 'ログイン', signingIn: 'ログイン中...',
       initialAdmin: '初期管理者', adminPanel: '管理パネル', measurement: '計測', reports: 'レポート', administration: '管理',
+      adminSettingsTooltip: 'アカウント設定、言語、ルールのプロフィールを開きます。',
+      adminMeasurementTooltip: 'プレーを計測・記録する画面を開きます。',
+      adminReportsTooltip: '保存された履歴とレポートを表示します。',
+      adminSystemTooltip: 'バックアップ、保守、システムツールにアクセスします。',
+      adminLogoutTooltip: '現在のセッションを終了します。',
       systemAdmin: 'システム管理', newRegistration: '新規登録', firstName: '名', lastName: '姓', phoneContact: '電話番号',
       initialPassword: '初期パスワード', roleUser: 'ユーザー', roleAdmin: '管理者', roleTournament: 'トーナメント', creatingUser: '保存中...',
       createShort: '作成', usersShort: 'ユーザー', createUser: 'ユーザー作成', createdUsers: '作成済みユーザー', noContact: '連絡先なし', makeUser: 'ユーザー化',
@@ -808,6 +820,7 @@ const NO_PERIOD_KEYS = new Set([
   'newRegistration', 'firstName', 'lastName', 'phoneContact', 'initialPassword',
   'roleUser', 'roleAdmin', 'roleTournament', 'creatingUser', 'createShort', 'createGame', 'usersShort', 'createUser', 'createdUsers', 'noContact',
   'makeUser', 'makeAdmin', 'resetPassword', 'deleteUser', 'adminRegistrationDesc', 'createdUsersDesc', 'adminFormDesc',
+  'adminSettingsTooltip', 'adminMeasurementTooltip', 'adminReportsTooltip', 'adminSystemTooltip', 'adminLogoutTooltip',
   'newPassword', 'confirmNewPassword', 'resetPasswordTitle', 'resetPasswordDesc', 'savePassword',
   'subscriptionValidity', 'validityLabel', 'validityValue', 'validityUnit', 'validityDays', 'validityMonths', 'validityYears',
   'baseScore', 'bonusScore', 'bonusType', 'totalScore',
@@ -815,7 +828,6 @@ const NO_PERIOD_KEYS = new Set([
   'selectedUser', 'accountValidityTitle', 'accountValidityHint', 'expireUser', 'reactivateUser', 'loginExpired', 'neverExpires', 'neverExpiresHint',
   'backupSectionTitle', 'backupSectionHint', 'createBackupNow', 'refreshBackups', 'loadingBackups', 'backupSafetyNote', 'backupEmpty', 'backupUsersCount', 'backupGamesCount', 'backupSettingsCount', 'restoringBackup', 'restoreBackup', 'restoreBackupConfirm', 'backupCreateFailed', 'backupRestoreFailed', 'backupLoadFailed', 'backupDeleteFailed', 'viewBackups', 'backupsModalTitle', 'backupsModalDesc', 'deleteBackup', 'deleteSelectedBackups', 'deleteBackupConfirm', 'deleteSelectedBackupsConfirm', 'systemBackupSectionTitle', 'systemBackupSectionHint', 'createSystemBackupNow', 'refreshSystemBackups', 'loadingSystemBackups', 'systemBackupSafetyNote', 'systemBackupEmpty', 'systemBackupRecordsCount', 'systemBackupUploadsCount', 'systemBackupUserBackupsCount', 'restoringSystemBackup', 'restoreSystemBackup', 'restoreSystemBackupConfirm', 'systemBackupCreateFailed', 'systemBackupRestoreFailed', 'systemBackupLoadFailed', 'systemBackupDeleteFailed', 'viewSystemBackups', 'systemBackupsModalTitle', 'systemBackupsModalDesc', 'deleteSystemBackup', 'deleteSelectedSystemBackups', 'deleteSystemBackupConfirm', 'deleteSelectedSystemBackupsConfirm', 'systemBackupRecordsCount', 'systemBackupUploadsCount', 'systemBackupUserBackupsCount',
   'analysis', 'analysisTitle', 'analysisUpload', 'analysisReportsButton', 'analysisSummary', 'analysisFile', 'analysisFormat', 'analysisFormatTxt', 'analysisFormatCsv', 'analysisFormatMatch', 'analysisPlusMarkers', 'analysisSequenceBreakdown', 'analysisComparison', 'analysisVerdict', 'analysisVerdictMaxima', 'analysisVerdictContinuity', 'analysisVerdictPower', 'analysisVerdictMixed', 'analysisVerdictUnknown', 'analysisMaximaCount', 'analysisContinuityCount', 'analysisPowerCount', 'analysisUnknownCount', 'analysisFceMatches', 'analysisRows', 'analysisSideA', 'analysisSideB', 'analysisField2', 'analysisField3', 'analysisNoFile', 'analysisNoPlus', 'analysisNoDrops', 'analysisReportsTitle', 'analysisReportsHint', 'analysisSelectReport', 'analysisSelectedReport', 'analysisStoredEmpty', 'analysisDeleteReport', 'analysisSavedNotice', 'analysisDeleteReportConfirm', 'analysisRule1Label', 'analysisRule2Label', 'analysisBestRule', 'analysisAvgSpeed', 'analysisMaxSpeed', 'analysisDrops', 'analysisTime', 'analysisDirection', 'analysisSpeed', 'analysisBonusType', 'analysisNarrative', 'analysisResponsible', 'analysisDuoScore', 'analysisPrimaryScore', 'analysisScoringBalls', 'analysisBestBall', 'analysisWorstBall', 'analysisBonusCount', 'analysisBonusAmount',
-  'insertDemoMatch', 'creatingDemoMatch',
   'gameSetupTitle', 'duoName', 'teamNamePlaceholder', 'visibility', 'publicGame', 'privateGame', 'startGame', 'warmup', 'startWarmup', 'pauseWarmup', 'finishWarmup', 'warmupActive', 'warmupDone', 'warmupStatus', 'matchInProgressTitle', 'matchInProgressDesc', 'continueGame', 'tournamentRoom', 'tournamentView', 'tournamentControlPanel', 'openTournamentView', 'mainMenu', 'controlCommands', 'controlCommandsHint', 'tournamentMode', 'ballDrop', 'undoDrop', 'resetMatch', 'resetMatchDialogTitle', 'resetMatchDialogDesc', 'resetMatchDialogConfirm', 'resetMatchDialogCancel',
   'liveStatus', 'finishedStatus', 'liveGames', 'finishedGames', 'watch', 'spectatorHubTitle',
   'createSection1Title', 'createSection1Hint', 'createSection2Title', 'createSection2Hint', 'createSection3Title', 'createSection3Hint',
@@ -847,12 +859,19 @@ function persistStoredLanguage(language) {
 }
 
 export function getAppLanguage(preferredLanguage = null) {
-  return preferredLanguage || readStoredLanguage() || DEFAULT_LANGUAGE;
+  const nextLanguage = activeLanguage || readStoredLanguage() || preferredLanguage || DEFAULT_LANGUAGE;
+  if (!activeLanguage) {
+    activeLanguage = nextLanguage;
+  }
+  return nextLanguage;
 }
 
 export function setAppLanguage(language) {
-  persistStoredLanguage(language);
-  window.dispatchEvent(new CustomEvent('app-language-changed', { detail: language }));
+  const nextLanguage = language || DEFAULT_LANGUAGE;
+  activeLanguage = nextLanguage;
+  persistStoredLanguage(nextLanguage);
+  window.dispatchEvent(new CustomEvent('app-language-changed', { detail: nextLanguage }));
+  return nextLanguage;
 }
 
 export function useI18n() {
@@ -872,11 +891,8 @@ export function useI18n() {
 
   useEffect(() => {
     if (isLoadingPublicSettings) return;
-    const nextLanguage = getAppLanguage(appPublicSettings?.language);
-    if (nextLanguage !== language) {
-      setLanguage(nextLanguage);
-    }
-  }, [appPublicSettings?.language, isLoadingPublicSettings, language]);
+    setLanguage(getAppLanguage(appPublicSettings?.language));
+  }, [appPublicSettings?.language, isLoadingPublicSettings]);
 
   const t = (key, params) => {
     const dict = messages[language] && Object.keys(messages[language]).length > 0 ? messages[language] : messages[DEFAULT_LANGUAGE];

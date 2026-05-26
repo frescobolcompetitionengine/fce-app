@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.frescobolramiro.app',
-  appName: 'Frescobol Ramiro',
+  appName: 'FCE',
   webDir: 'dist',
   bundledWebRuntime: false,
   server: {

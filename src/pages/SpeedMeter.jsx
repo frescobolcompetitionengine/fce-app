@@ -55,7 +55,7 @@ const DEFAULT_SETTINGS = {
 };
 
 const GENERIC_TEAM_NAME_PATTERN = /^[A-Z]{3}\s[A-Z]\s&\s[A-Z]{3}\s[A-Z]$/;
-const GENERIC_PLAYER_NAME_PATTERN = /^(?:Player|Jogador|ãƒ—ãƒ¬ã‚¤ãƒ¤ãƒ¼)\s*[12]$/u;
+const GENERIC_PLAYER_NAME_PATTERN = /^(?:Player|Jogador|プレイヤー)\s*[12]$/u;
 
 const normalizeDisplayedValue = (value, pattern) => {
   const normalized = String(value ?? '').trim();
@@ -173,6 +173,7 @@ export default function SpeedMeter({ displayMode = 'full' }) {
     warmupAccumulatedMs: warmupAccumulatedMsRef.current,
   });
   const warmupControlsLocked = shouldLockWarmupControls({
+    gameStarted,
     isWarmupCompleted,
     warmupStartedAtMs: warmupStartedAtRef.current,
     warmupAccumulatedMs: warmupAccumulatedMsRef.current,
@@ -815,7 +816,7 @@ export default function SpeedMeter({ displayMode = 'full' }) {
   }, [gameStarted, isSpectator, performResetTimer]);
 
   const handleWarmupToggle = useCallback(() => {
-    if (isSpectator || warmupDuration <= 0) return;
+    if (isSpectator || warmupDuration <= 0 || gameStarted) return;
     const now = Date.now();
     setIsWarmupModalOpen(true);
 
@@ -834,7 +835,7 @@ export default function SpeedMeter({ displayMode = 'full' }) {
     setWarmupTimeLeft(getWarmupRemainingSeconds(now));
     setIsWarmupRunning(true);
     setIsWarmupCompleted(false);
-  }, [getWarmupRemainingSeconds, isSpectator, isWarmupCompleted, isWarmupRunning, pauseWarmupClock, resetWarmupClock, startWarmupClock, warmupDuration, warmupInProgress]);
+  }, [gameStarted, getWarmupRemainingSeconds, isSpectator, isWarmupCompleted, isWarmupRunning, pauseWarmupClock, resetWarmupClock, startWarmupClock, warmupDuration, warmupInProgress]);
 
   const handleWarmupFinish = useCallback(() => {
     if (isSpectator || warmupDuration <= 0) return;

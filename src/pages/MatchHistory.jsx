@@ -1,5 +1,5 @@
-﻿import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Calendar, ChevronRight, Trash2, CheckSquare, Square, Download, FileText, Wand2 } from 'lucide-react';
+﻿import React, { useState } from 'react';
+import { ArrowLeft, Calendar, ChevronRight, Trash2, CheckSquare, Square, Download, FileText } from 'lucide-react';
 import { Navigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -10,9 +10,9 @@ import { formatMatchDateTime, getMatchStatus, getMatchTitle, getMatchVisibility 
 import { createSpeedScoreCalculator, resolveScoringConfiguration } from '@/lib/scoring';
 import { exportMatchCSV as exportMatchCSVHelper, exportMatchesCSV as exportMatchesCSVHelper, exportMatchesPDF as exportMatchesPDFHelper } from '@/lib/matchHistoryTools';
 import { filterMatchHistoryByOwner } from '@/lib/matchHistoryView';
-import { deleteSelectedMatchHistory, deleteSingleMatchHistory, openOrCreateDemoMatch, seedDemoMatchIfMissing } from '@/lib/matchHistoryActions';
+import { deleteSelectedMatchHistory, deleteSingleMatchHistory } from '@/lib/matchHistoryActions';
 import PageShell from '@/components/PageShell';
-import { createMatchHistory, deleteMatchHistory, deleteManyMatchHistory, listMatchHistory } from '@/services/matchHistoryRepository';
+import { deleteMatchHistory, deleteManyMatchHistory, listMatchHistory } from '@/services/matchHistoryRepository';
 
 function exportCSV(match, t) {
   const csv = exportMatchCSVHelper(match, t);
@@ -47,8 +47,6 @@ export default function MatchHistory() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [deleting, setDeleting] = useState(false);
-  const [creatingDemo, setCreatingDemo] = useState(false);
-  const demoSeededRef = useRef(false);
   const queryClient = useQueryClient();
   const { t, language } = useI18n();
   const { user, users, isAdmin, isSpectator } = useAuth();
@@ -87,37 +85,7 @@ export default function MatchHistory() {
     setDeleting,
   });
 
-  const createDemoReport = () => openOrCreateDemoMatch({
-    allMatches,
-    user,
-    t,
-    createMatchHistory,
-    queryClient,
-    setSelected,
-    setShowReport,
-    setCreatingDemo,
-  });
 
-  useEffect(() => {
-    if (isLoading || isSpectator || !user?.id || demoSeededRef.current) return;
-
-    (async () => {
-      try {
-        await seedDemoMatchIfMissing({
-          allMatches,
-          user,
-          t,
-          createMatchHistory,
-          queryClient,
-          setSelected,
-          setShowReport,
-          demoSeededRef,
-        });
-      } catch (error) {
-        console.error('Failed to seed demo match:', error);
-      }
-    })();
-  }, [allMatches, createMatchHistory, isLoading, isSpectator, queryClient, t, user, setSelected, setShowReport]);
 
   if (isLoading) {
     return <div className="min-h-[100dvh] bg-gradient-to-b from-[#1a1a2e] to-[#0d0d1a] flex items-center justify-center"><div className="animate-spin w-8 h-8 border-4 border-[#0f9b8e] border-t-transparent rounded-full" /></div>;
@@ -163,7 +131,7 @@ export default function MatchHistory() {
         <div className="space-y-3 max-w-lg mx-auto">
           {isAdmin && (
             <div className="bg-[#16213e] border border-[#2a2a4a] rounded-xl p-3">
-              <label className="text-xs text-gray-400">Filtro de usuÃ¡rio.</label>
+              <label className="text-xs text-gray-400">Filtro de usuário.</label>
               <select value={selectedOwner} onChange={(e) => setSelectedOwner(e.target.value)} className="mt-1 w-full h-10 rounded-lg bg-[#0d0d1a] border border-[#3a3a5a] px-2 text-sm">
                 <option value="mine">Meus jogos.</option>
                 <option value="all">Todos os jogos.</option>
@@ -175,14 +143,6 @@ export default function MatchHistory() {
               </select>
             </div>
           )}
-          <button
-            onClick={createDemoReport}
-            disabled={creatingDemo}
-            className="w-full flex items-center justify-center gap-2 rounded-2xl border border-[#0f9b8e]/40 bg-[#0f9b8e]/10 px-4 py-3 text-sm font-semibold text-[#b8f2ea] transition-colors hover:bg-[#0f9b8e]/20 disabled:opacity-60"
-          >
-            <Wand2 className={`w-4 h-4 ${creatingDemo ? 'animate-pulse' : ''}`} />
-            {creatingDemo ? t('creatingDemoMatch') : t('insertDemoMatch')}
-          </button>
           {matches.length === 0 && <div className="text-center text-gray-500 mt-16"><Calendar className="w-12 h-12 mx-auto mb-3 opacity-30" /><p>{t('noMatchesYet')}</p></div>}
           {matches.map((match) => {
             const { date, time } = formatMatchDateTime(match.played_at, language);
